@@ -285,6 +285,8 @@ La app corre en `http://localhost:3000`.
   - actualiza la regla de estados del trigger.
 - `src/lib/pedidos.js` y `/pedidos` usan los nuevos estados; los botones son "Pasar a proceso" y "Entregar al cliente".
 - **Nueva** sección "Despliegue en Vercel" en este README.
+- Se quitó de la URL del remoto `origin` un token de GitHub que estaba guardado en texto plano (ya era inválido). La autenticación ahora la hace Git Credential Manager con inicio de sesión en el navegador.
+- Todo el trabajo de las fases 1 a 3 quedó en la rama `sucursales-y-pedidos`, pendiente de subir a GitHub.
 
 ### 2026-11-07 — Fase 3 aplicada en Supabase
 - `fase3_pedidos.sql` ejecutado y verificado: tablas con RLS, 4 triggers, vista `pedidos_resumen` con `security_invoker`, RPC solo para usuarios con sesión. Se eliminó `movimientos_chofer`.
