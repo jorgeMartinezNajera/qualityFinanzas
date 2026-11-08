@@ -5,6 +5,12 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState } fro
 /** Valor de "sucursal activa" que significa ver ambas sucursales. */
 export const TODAS = 'todas'
 
+/**
+ * Evento que dispara el botón "+" de la isla de navegación (teléfono).
+ * Cada sección lo escucha y ejecuta su acción principal (p. ej. abrir "Generar movimiento").
+ */
+export const EVENTO_ACCION = 'panel:accion-principal'
+
 const PanelContext = createContext(null)
 
 /**
@@ -16,6 +22,8 @@ export function PanelProvider({ usuario, sucursales, children }) {
     usuario.rol === 'admin' ? usuario.sucursal_id : TODAS
   )
   const [encabezadoExtra, setEncabezadoExtra] = useState(null)
+  // Texto del botón "+" de la isla; null lo oculta (la sección no tiene acción principal).
+  const [accionPrincipal, setAccionPrincipal] = useState(null)
 
   // Caché en memoria: al volver a una sección se muestran sus últimos datos al instante
   // mientras se recargan en segundo plano. Se pierde al recargar el navegador.
@@ -34,9 +42,11 @@ export function PanelProvider({ usuario, sucursales, children }) {
       : (sucursales.find(s => s.id === sucursalActiva)?.nombre || ''),
     encabezadoExtra,
     setEncabezadoExtra,
+    accionPrincipal,
+    setAccionPrincipal,
     leerCache,
     guardarCache,
-  }), [usuario, sucursales, sucursalActiva, encabezadoExtra, leerCache, guardarCache])
+  }), [usuario, sucursales, sucursalActiva, encabezadoExtra, accionPrincipal, leerCache, guardarCache])
 
   return <PanelContext.Provider value={valor}>{children}</PanelContext.Provider>
 }

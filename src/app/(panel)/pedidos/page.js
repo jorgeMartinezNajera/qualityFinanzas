@@ -1,9 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { esAdministrador } from '@/lib/permisos'
-import { TODAS, usePanel } from '@/components/panel/PanelProvider'
+import { EVENTO_ACCION, TODAS, usePanel } from '@/components/panel/PanelProvider'
 import { EsqueletoTabla } from '@/components/panel/Esqueleto'
 import {
   ACCION_SIGUIENTE, METODOS_PAGO, NOMBRE_ESTADO, NOMBRE_PAGO, ORDEN_ESTADOS,
@@ -22,7 +22,10 @@ function formInicial(sucursalId) {
 
 export default function PedidosPage() {
   // Sesión, sucursales y sucursal activa vienen del layout del panel (ya cargados).
-  const { usuario: yo, sucursales, sucursalActiva, leerCache, guardarCache } = usePanel()
+  const { usuario: yo, sucursales, sucursalActiva, setAccionPrincipal, leerCache, guardarCache } = usePanel()
+  // En teléfono el formulario de alta se pliega; lo abre el botón "+" de la isla de navegación.
+  const [formAbierto, setFormAbierto] = useState(false)
+  const formRef = useRef(null)
   const [choferes, setChoferes] = useState(() => leerCache('choferes') || [])
   const [pedidos, setPedidos] = useState(() => leerCache('pedidos') || null)  // null = aún no llegan
   const [form, setForm] = useState(() => formInicial(
@@ -73,6 +76,19 @@ export default function PedidosPage() {
       })
     return () => { activo = false; clearTimeout(timer) }
   }, [cargarPedidos, guardarCache])
+
+  useEffect(() => {
+    setAccionPrincipal('Nuevo pedido')
+    function abrirFormulario() {
+      setFormAbierto(true)
+      requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    }
+    window.addEventListener(EVENTO_ACCION, abrirFormulario)
+    return () => {
+      window.removeEventListener(EVENTO_ACCION, abrirFormulario)
+      setAccionPrincipal(null)
+    }
+  }, [setAccionPrincipal])
 
   const cargando = pedidos === null
   // El filtro de sucursal es el selector del encabezado del panel.
@@ -131,6 +147,7 @@ export default function PedidosPage() {
     if (e) return fallar(e.message)
 
     setForm(formInicial(form.sucursalId))
+    setFormAbierto(false)
     setCliente(null)
     await cargarPedidos()
     setSeleccion(nuevoId)
@@ -221,8 +238,15 @@ export default function PedidosPage() {
       {mensaje && <p className="extension-alert success">{mensaje}</p>}
 
       <section className="extension-grid">
-        <form className="extension-card" onSubmit={crearPedido}>
-          <h2>Nuevo pedido</h2>
+        <form
+          ref={formRef}
+          className={`extension-card pedido-form ${formAbierto ? '' : 'pedido-form-plegado'}`}
+          onSubmit={crearPedido}
+        >
+          <div className="pedido-form-cabecera">
+            <h2>Nuevo pedido</h2>
+            <button type="button" className="btn btn-ghost solo-movil" onClick={() => setFormAbierto(false)}>Cerrar</button>
+          </div>
           <div className="extension-form-row">
             <label>Sucursal que recibe
               {eligeSucursal ? (
@@ -286,7 +310,7 @@ export default function PedidosPage() {
           <button className="btn btn-primary" type="submit" disabled={enviando}>{enviando ? 'Guardando…' : 'Registrar pedido'}</button>
         </form>
 
-        <div className="extension-card">
+        <div className="extension-card pedido-ayuda">
           <h2>Cómo funciona</h2>
           <ul className="extension-list">
             <li>El pedido pasa por <strong>En tienda → En proceso → Entregado</strong>. Cada cambio queda en el historial.</li>
@@ -312,7 +336,7 @@ export default function PedidosPage() {
           </label>
         </div>
         <div className="table-wrap">
-          <table className="operations-table">
+          <table className="operations-table pedidos-table">
             <thead><tr><th>Folio</th><th>Cliente</th><th>Sucursal</th><th>Entrega</th><th>Chofer</th><th>Total</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
             <tbody>
               {cargando ? (
@@ -324,10 +348,10 @@ export default function PedidosPage() {
                   <td className="op-id">{p.folio}</td>
                   <td>{p.cliente_nombre}<span className="row-meta">{p.cliente_telefono}</span></td>
                   <td>{p.sucursal_nombre}</td>
-                  <td>{fechaCorta(p.fecha_entrega)}{p.urgencia === 'alta' && <span className="tag tag-out pedido-urgente">Urgente</span>}</td>
+                  <td data-label="Entrega">{fechaCorta(p.fecha_entrega)}{p.urgencia === 'alta' && <span className="tag tag-out pedido-urgente">Urgente</span>}</td>
                   <td>{p.chofer_nombre || 'Sin asignar'}</td>
-                  <td>{dinero(p.monto_total)}</td>
-                  <td>{dinero(p.saldo)}</td>
+                  <td data-label="Total">{dinero(p.monto_total)}</td>
+                  <td data-label="Saldo">{dinero(p.saldo)}</td>
                   <td><span className={`tag ${p.estado === 'cancelado' ? 'tag-out' : 'tag-in'}`}>{NOMBRE_ESTADO[p.estado]}</span></td>
                   <td><button type="button" className="btn btn-ghost" onClick={() => abrir(p.id)}>{seleccion === p.id ? 'Cerrar' : 'Ver'}</button></td>
                 </tr>

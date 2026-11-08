@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { TODAS, usePanel } from '@/components/panel/PanelProvider'
+import { EVENTO_ACCION, TODAS, usePanel } from '@/components/panel/PanelProvider'
 import { EsqueletoTabla } from '@/components/panel/Esqueleto'
 
 const MOV_COLUMNAS = [
@@ -410,7 +410,7 @@ function TotalesCard({ totales }) {
 export default function Finanzas() {
   const {
     usuario, sucursales, sucursalActiva, esVistaGlobal, nombreSucursalActiva,
-    setEncabezadoExtra, leerCache, guardarCache,
+    setEncabezadoExtra, setAccionPrincipal, leerCache, guardarCache,
   } = usePanel()
   const currentUser = usuario
 
@@ -428,6 +428,7 @@ export default function Finanzas() {
     endDate: '',
   })
   const [chartType, setChartType] = useState('salida')
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false)
   // Resumen / Todos los registros / Reportes viven en la URL (?vista=...): el menú del panel navega sin recargar.
   const currentView = useSearchParams().get('vista') || 'resumen'
   const [reportType, setReportType] = useState('frecuencia')
@@ -556,6 +557,12 @@ export default function Finanzas() {
     )
   }, [balance, loading, setEncabezadoExtra])
   useEffect(() => () => setEncabezadoExtra(null), [setEncabezadoExtra])
+
+  // Botón "+" de la isla de navegación (teléfono): abre "Generar un movimiento".
+  useEffect(() => {
+    setAccionPrincipal(currentView === 'reportes' ? null : 'Generar un movimiento')
+  }, [currentView, setAccionPrincipal])
+  useEffect(() => () => setAccionPrincipal(null), [setAccionPrincipal])
 
   const monthTitle = useMemo(() => {
     const d = new Date()
@@ -916,6 +923,12 @@ export default function Finanzas() {
     setTimeout(() => { setEditModalOpen(false); setEditTarget(null) }, 180)
   }
 
+  useEffect(() => {
+    function alAccionPrincipal() { openAddModal() }
+    window.addEventListener(EVENTO_ACCION, alAccionPrincipal)
+    return () => window.removeEventListener(EVENTO_ACCION, alAccionPrincipal)
+  })
+
   /* ── Escape ── */
 
   useEffect(() => {
@@ -1144,9 +1157,33 @@ export default function Finanzas() {
 
   /* ── Select helpers (inline) ── */
 
+  const filtrosActivos =
+    (filters.period !== 'all' ? 1 : 0) + (filters.type !== 'all' ? 1 : 0) + (filters.sort !== 'date' ? 1 : 0)
+
   function renderFilters(prefix) {
+    const resumenFiltros = [
+      getPeriodDescription(filters.period, filters.startDate, filters.endDate),
+      TYPE_OPTIONS.find(o => o.value === filters.type)?.label,
+      SORT_OPTIONS.find(o => o.value === filters.sort)?.label,
+    ].join(' · ')
     return (
-      <div className="filter-bar">
+      <>
+      {/* En teléfono los filtros se pliegan detrás de este botón; en computadora siempre están visibles. */}
+      <button
+        type="button"
+        className={`filtros-toggle ${filtrosAbiertos ? 'abierto' : ''}`}
+        aria-expanded={filtrosAbiertos}
+        aria-controls={`${prefix}Filtros`}
+        onClick={() => setFiltrosAbiertos(v => !v)}
+      >
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+        <span className="filtros-toggle-texto">
+          <strong>Filtros{filtrosActivos > 0 && <span className="filtros-contador">{filtrosActivos}</span>}</strong>
+          <span className="filtros-resumen">{resumenFiltros}</span>
+        </span>
+        <svg aria-hidden="true" className="filtros-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div id={`${prefix}Filtros`} className={`filter-bar ${filtrosAbiertos ? '' : 'filtros-plegados'}`}>
         <SelectDropdown
           id={`${prefix}Period`}
           label="Periodo"
@@ -1243,6 +1280,7 @@ export default function Finanzas() {
           onChange={val => onFilterChange('sort', val)}
         />
       </div>
+      </>
     )
   }
 
@@ -1322,7 +1360,7 @@ export default function Finanzas() {
           </div>
           {renderFilters("resumen")}
           <div className="table-wrap">
-            <table className="operations-table">
+            <table className="operations-table mov-table">
               <thead>
                 <tr>
                   <th>Fecha</th>
@@ -1365,7 +1403,7 @@ export default function Finanzas() {
           </div>
           {renderFilters("todos")}
           <div className="table-wrap">
-            <table className="operations-table">
+            <table className="operations-table mov-table">
               <thead>
                 <tr>
                   <th>Fecha</th>
