@@ -10,7 +10,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { getPerfilRapido } from '@/lib/session'
 import { NOMBRE_ROL, esAdministrador } from '@/lib/permisos'
-import { PanelProvider, TODAS, usePanel } from '@/components/panel/PanelProvider'
+import { EVENTO_ACCION, PanelProvider, TODAS, usePanel } from '@/components/panel/PanelProvider'
 import { EsqueletoBloque, EsqueletoSeccion } from '@/components/panel/Esqueleto'
 
 /* ── Modo oscuro (preferencia en localStorage) ── */
@@ -31,19 +31,23 @@ function getDarkModeServerSnapshot() {
 
 /* ── Secciones del menú ── */
 const ICONOS = {
-  resumen: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
-  todos: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
-  reportes: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>,
-  pedidos: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="7" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M16 3l5 5-5 5"/><path d="M21 8h-8"/></svg>,
-  personal: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+  resumen: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
+  todos: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
+  reportes: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>,
+  pedidos: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="7" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M16 3l5 5-5 5"/><path d="M21 8h-8"/></svg>,
+  personal: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
 }
 
+const ICONO_MAS = <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+const ICONO_AGREGAR = <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+
+// enIsla: aparece en la isla flotante de íconos del teléfono (el resto queda en "Más").
 const SECCIONES = [
-  { id: 'resumen', etiqueta: 'Resumen', href: '/finanzas', ruta: '/finanzas', vista: 'resumen', titulo: 'Finanzas', soloAdmin: true },
-  { id: 'todos', etiqueta: 'Todos los registros', href: '/finanzas?vista=todos', ruta: '/finanzas', vista: 'todos', titulo: 'Finanzas', soloAdmin: true },
-  { id: 'reportes', etiqueta: 'Reportes', href: '/finanzas?vista=reportes', ruta: '/finanzas', vista: 'reportes', titulo: 'Finanzas', soloAdmin: true },
-  { id: 'pedidos', etiqueta: 'Pedidos', href: '/pedidos', ruta: '/pedidos', titulo: 'Pedidos', soloAdmin: false },
-  { id: 'personal', etiqueta: 'Personal', href: '/usuarios', ruta: '/usuarios', titulo: 'Personal', soloAdmin: true },
+  { id: 'resumen', etiqueta: 'Resumen', href: '/finanzas', ruta: '/finanzas', vista: 'resumen', titulo: 'Finanzas', soloAdmin: true, enIsla: true },
+  { id: 'todos', etiqueta: 'Todos los registros', corto: 'Registros', href: '/finanzas?vista=todos', ruta: '/finanzas', vista: 'todos', titulo: 'Finanzas', soloAdmin: true, enIsla: true },
+  { id: 'reportes', etiqueta: 'Reportes', href: '/finanzas?vista=reportes', ruta: '/finanzas', vista: 'reportes', titulo: 'Finanzas', soloAdmin: true, enIsla: true },
+  { id: 'pedidos', etiqueta: 'Pedidos', href: '/pedidos', ruta: '/pedidos', titulo: 'Pedidos', soloAdmin: false, enIsla: true },
+  { id: 'personal', etiqueta: 'Personal', href: '/usuarios', ruta: '/usuarios', titulo: 'Personal', soloAdmin: true, enIsla: false },
 ]
 
 /** Rutas a las que puede entrar cada rol (el chofer solo trabaja en pedidos). */
@@ -74,7 +78,7 @@ function Estructura({ children }) {
   const pathname = usePathname()
   const vista = useSearchParams().get('vista') || 'resumen'
   const {
-    usuario, sucursales, sucursalActiva, setSucursalActiva, nombreSucursalActiva, encabezadoExtra,
+    usuario, sucursales, sucursalActiva, setSucursalActiva, nombreSucursalActiva, encabezadoExtra, accionPrincipal,
   } = usePanel()
   const [menuAbierto, setMenuAbierto] = useState(false)
   const darkMode = useSyncExternalStore(subscribeDarkMode, getDarkModeSnapshot, getDarkModeServerSnapshot)
@@ -167,27 +171,34 @@ function Estructura({ children }) {
         </nav>
       </div>
 
+      {/* En computadora es una sola fila; en teléfono se acomoda en dos (ver .app-header en globals.css). */}
       <header className="app-header">
         <button className="hamburger" onClick={() => setMenuAbierto(true)} aria-label="Abrir menú">
           <span></span><span></span><span></span>
         </button>
-        <div>
+        <div className="app-header-titulo">
           <h1 className="app-title">{activa?.titulo || 'Quality'}</h1>
           <p className="app-subtitle">{activa?.etiqueta}</p>
         </div>
-        {eligeSucursal ? (
-          <select
-            className="sucursal-select"
-            aria-label="Sucursal"
-            value={sucursalActiva}
-            onChange={e => setSucursalActiva(e.target.value)}
-          >
-            <option value={TODAS}>Ambas sucursales</option>
-            {sucursales.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-          </select>
-        ) : (
-          <span className="sucursal-label">{nombreSucursalActiva}</span>
-        )}
+        <div className="app-header-herramientas">
+          {eligeSucursal ? (
+            <label className="sucursal-campo">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></svg>
+              <select
+                className="sucursal-select"
+                aria-label="Sucursal"
+                value={sucursalActiva}
+                onChange={e => setSucursalActiva(e.target.value)}
+              >
+                <option value={TODAS}>Ambas sucursales</option>
+                {sucursales.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+              </select>
+            </label>
+          ) : (
+            <span className="sucursal-label">{nombreSucursalActiva}</span>
+          )}
+          {encabezadoExtra}
+        </div>
         <div className="header-account-group">
           <div className="account-user-pill" title={`Cuenta activa: ${usuario.nombre} (${NOMBRE_ROL[usuario.rol]})`}>
             <span className="account-user-avatar">
@@ -197,11 +208,44 @@ function Estructura({ children }) {
             </span>
             <span className="account-user-name">{usuario.nombre}</span>
           </div>
-          {encabezadoExtra}
         </div>
       </header>
 
       {children}
+
+      {/* Isla flotante de íconos: navegación principal en teléfono (oculta en computadora). */}
+      <div className="isla">
+        <nav className="isla-barra" aria-label="Navegación rápida">
+          {secciones.filter(s => s.enIsla).map(s => (
+            <Link
+              key={s.id}
+              href={s.href}
+              className={`isla-item ${activa?.id === s.id ? 'activo' : ''}`}
+              aria-label={s.etiqueta}
+              aria-current={activa?.id === s.id ? 'page' : undefined}
+              title={s.etiqueta}
+            >
+              {ICONOS[s.id]}
+              <span className="isla-etiqueta">{s.corto || s.etiqueta}</span>
+            </Link>
+          ))}
+          <button type="button" className="isla-item" onClick={() => setMenuAbierto(true)} aria-label="Más opciones" title="Más">
+            {ICONO_MAS}
+            <span className="isla-etiqueta">Más</span>
+          </button>
+        </nav>
+        {accionPrincipal && (
+          <button
+            type="button"
+            className="isla-fab"
+            onClick={() => window.dispatchEvent(new Event(EVENTO_ACCION))}
+            aria-label={accionPrincipal}
+            title={accionPrincipal}
+          >
+            {ICONO_AGREGAR}
+          </button>
+        )}
+      </div>
     </div>
   )
 }

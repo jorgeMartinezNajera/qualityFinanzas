@@ -222,6 +222,14 @@ Pedidos con folio, cliente, teléfono, sucursal, chofer, `pagado` y `saldo`. Res
    - **Sucursal activa en el encabezado:** el superadmin y el chofer eligen "Ambas sucursales" o una; el admin ve la suya fija. Aplica a Finanzas, Pedidos y Personal.
    - **Carga suave:** `loading.js` y las tablas muestran esqueletos animados. Al volver a una sección se ven al instante sus últimos datos (caché en memoria) mientras se actualizan.
    - **Sesión cerrada:** si se cierra en otra pestaña o caduca, el panel regresa al login.
+   - **En teléfono (≤ 760 px):**
+     - El encabezado ocupa dos filas: título y cuenta arriba; sucursal y saldo abajo.
+     - El menú lateral se reemplaza por una **isla flotante de íconos** abajo (Resumen, Registros, Reportes, Pedidos y Más). "Más" abre el menú con Personal, modo oscuro y cerrar sesión.
+     - Un **botón "+"** ejecuta la acción principal de la sección: generar movimiento o nuevo pedido. Cada página lo declara con `setAccionPrincipal()` y escucha el evento `EVENTO_ACCION`.
+     - Los filtros se pliegan detrás de un botón con contador de filtros activos.
+     - Las tablas de movimientos y pedidos se muestran como tarjetas.
+     - Las pestañas de reportes quedan en una fila deslizable.
+     - Los estilos están al final de `globals.css` ("Optimización para teléfono"); en computadora no cambia nada.
 3. **Personal (`/usuarios`):** admin y superadmin dan de alta según su rol, ven el código generado una sola vez, generan un código nuevo y activan o desactivan personas.
 4. **Finanzas (`/finanzas`):** la vista (Resumen, Todos los registros, Reportes) va en la URL, así que el botón de regresar del navegador también funciona. El saldo aparece en el encabezado del panel. Saldos, gráficas (donut con CSS `conic-gradient`), historial con filtros en el cliente, reportes y exportación a Excel/CSV con sucursal y método de pago. Alta con sucursal (si se ve ambas), categoría del catálogo o nueva, fecha y método de pago. Menú por fila: modificar o **anular con motivo** (la fila queda tachada y deja de contar).
 5. **Pedidos (`/pedidos`):** para los tres roles; el filtro de sucursal es el selector del encabezado.
@@ -291,6 +299,17 @@ La app corre en `http://localhost:3000`.
 ---
 
 ## Registro de cambios
+
+### 2026-11-08 — Optimización para teléfono
+- **Encabezado:** en dos filas, porque antes el saldo se salía de la pantalla. El selector de sucursal tiene ícono y ocupa todo el ancho.
+- **Isla flotante de navegación** con íconos y botón "+" (acción principal de cada sección). Respeta la zona inferior del iPhone gracias a `viewportFit: "cover"` en `src/app/layout.js`.
+- **Filtros de movimientos plegables:** un botón muestra el resumen ("Todo el histórico · Todos · Más recientes") y cuántos filtros hay activos.
+- **Tablas como tarjetas:**
+  - Movimientos en dos líneas: concepto y monto arriba; fecha, folio y categoría abajo.
+  - Pedidos con cliente, estado, entrega, saldo y botón Ver.
+- **Pedidos:** el formulario de alta queda plegado hasta tocar "+" y se cierra al guardar. La tarjeta "Cómo funciona" se oculta.
+- **Reportes:** las tres pestañas pasan de botones apilados a una fila deslizable.
+- `PanelProvider` gana `accionPrincipal` / `setAccionPrincipal` y la constante `EVENTO_ACCION`.
 
 ### 2026-11-08 — Panel común: navegación sin recargas
 - **Antes:** Pedidos y Personal se abrían con enlaces `<a>` que recargaban toda la app, y cada página volvía a verificar la sesión en 3 o 4 consultas seguidas ("Cargando pedidos…"). Además tenían otro diseño y un botón "← Finanzas".
