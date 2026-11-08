@@ -26,6 +26,26 @@ export async function getUsuarioActual() {
   return usuario?.activo ? usuario : null
 }
 
+/**
+ * Igual que getPerfilAutenticado(), pero lee la sesión guardada en el navegador
+ * (getSession, sin viaje a Supabase Auth). Sirve para pintar la interfaz rápido;
+ * la seguridad no depende de esto: cada consulta la valida RLS con el token.
+ */
+export async function getPerfilRapido() {
+  const { data } = await supabase.auth.getSession()
+  const authId = data.session?.user?.id
+  if (!authId) return null
+
+  const { data: usuario, error } = await supabase
+    .from('usuarios')
+    .select(PERFIL_COLUMNAS)
+    .eq('auth_user_id', authId)
+    .maybeSingle()
+
+  if (error || !usuario) return null
+  return usuario
+}
+
 /** Token para llamar a las rutas /api que verifican la sesión. */
 export async function getAccessToken() {
   const { data } = await supabase.auth.getSession()

@@ -64,19 +64,25 @@ tintoreria-app/
 ├── src/
 │   ├── app/
 │   │   ├── page.js                  # Login (usuario + código)
-│   │   ├── finanzas/page.js         # Dashboard: saldos, gráficas, tablas, reportes, Excel
-│   │   ├── usuarios/page.js         # Personal: alta, nuevo código, activar/desactivar
-│   │   ├── pedidos/page.js          # Pedidos: alta, recorrido a planta, pagos, historial
+│   │   ├── (panel)/                 # Grupo de rutas: comparten menú, encabezado y sesión (no cambia las URLs)
+│   │   │   ├── layout.js            # Sesión (una vez), menú lateral, encabezado, sucursal activa, modo oscuro
+│   │   │   ├── loading.js           # Esqueleto que se muestra al navegar entre secciones
+│   │   │   ├── finanzas/page.js     # Resumen · ?vista=todos · ?vista=reportes; saldos, gráficas, Excel
+│   │   │   ├── pedidos/page.js      # Pedidos: alta, estados, pagos, historial
+│   │   │   └── usuarios/page.js     # Personal: alta, nuevo código, activar/desactivar
 │   │   ├── api/usuarios/route.js    # POST alta · PATCH regenerar código / activar / desactivar
 │   │   ├── api/keep-alive/route.js  # GET: consulta de solo lectura para mantener Supabase activo
 │   │   ├── globals.css              # Estilos globales + dark mode
 │   │   └── layout.js                # Layout raíz con fuentes
 │   └── lib/
 │       ├── supabase.js              # Cliente Supabase (anon key)
-│       ├── session.js               # getUsuarioActual(), getAccessToken()
+│       ├── session.js               # getPerfilRapido(), getUsuarioActual(), getAccessToken()
 │       ├── permisos.js              # Roles, quién crea/gestiona a quién, correo interno
 │       ├── pedidos.js               # Estados del pedido, nombres y formatos
 │       └── server/supabase-admin.js # Cliente service role + validación del solicitante (solo servidor)
+├── src/components/panel/
+│   ├── PanelProvider.js             # Contexto: usuario, sucursales, sucursal activa, caché, saldo en encabezado
+│   └── Esqueleto.js                 # Bloques de carga animados
 ├── scripts/
 │   ├── crear-superadmin.mjs         # Alta del primer superadmin
 │   ├── restablecer-codigo.mjs       # Código nuevo para un alias (recuperación)
@@ -208,16 +214,24 @@ Pedidos con folio, cliente, teléfono, sucursal, chofer, `pagado` y `saldo`. Res
 ## Flujo de la aplicación
 
 1. **Login:** usuario + código → `signInWithPassword` con el correo interno → se lee el perfil. El chofer va a `/pedidos`; admin y superadmin a `/finanzas`.
-2. **Personal (`/usuarios`):** admin y superadmin dan de alta según su rol, ven el código generado una sola vez, generan un código nuevo y activan o desactivan personas.
-3. **Finanzas (`/finanzas`):** el superadmin elige "Ambas sucursales", Plaza o San Mateo en el encabezado; el admin ve solo la suya. Saldos, gráficas (donut con CSS `conic-gradient`), historial con filtros en el cliente, reportes y exportación a Excel/CSV con sucursal y método de pago. Alta con sucursal (si se ve ambas), categoría del catálogo o nueva, fecha y método de pago. Menú por fila: modificar o **anular con motivo** (la fila queda tachada y deja de contar).
-4. **Pedidos (`/pedidos`):** para los tres roles.
+2. **Panel común (`src/app/(panel)/layout.js`):** Finanzas, Pedidos y Personal comparten el menú lateral y el encabezado.
+   - **Sesión una sola vez:** el layout no se vuelve a montar al navegar. Lee la sesión guardada en el navegador (`getPerfilRapido`), el perfil y las sucursales, y los comparte con `usePanel()`.
+   - **Navegación sin recargas:** el menú usa `<Link>`, que Next.js precarga.
+     - Admin y superadmin: Resumen, Todos los registros y Reportes (`/finanzas?vista=…`), Pedidos y Personal.
+     - Chofer: solo Pedidos. Si intenta otra ruta, se le lleva a `/pedidos`.
+   - **Sucursal activa en el encabezado:** el superadmin y el chofer eligen "Ambas sucursales" o una; el admin ve la suya fija. Aplica a Finanzas, Pedidos y Personal.
+   - **Carga suave:** `loading.js` y las tablas muestran esqueletos animados. Al volver a una sección se ven al instante sus últimos datos (caché en memoria) mientras se actualizan.
+   - **Sesión cerrada:** si se cierra en otra pestaña o caduca, el panel regresa al login.
+3. **Personal (`/usuarios`):** admin y superadmin dan de alta según su rol, ven el código generado una sola vez, generan un código nuevo y activan o desactivan personas.
+4. **Finanzas (`/finanzas`):** la vista (Resumen, Todos los registros, Reportes) va en la URL, así que el botón de regresar del navegador también funciona. El saldo aparece en el encabezado del panel. Saldos, gráficas (donut con CSS `conic-gradient`), historial con filtros en el cliente, reportes y exportación a Excel/CSV con sucursal y método de pago. Alta con sucursal (si se ve ambas), categoría del catálogo o nueva, fecha y método de pago. Menú por fila: modificar o **anular con motivo** (la fila queda tachada y deja de contar).
+5. **Pedidos (`/pedidos`):** para los tres roles; el filtro de sucursal es el selector del encabezado.
    - **Alta:** sucursal que recibe y teléfono del cliente (si ya existe muestra su nombre; si no, pide el nombre). Total, anticipo y su método, fecha de entrega, urgencia, chofer y notas.
    - **Lista:** filtros por estado ("En proceso", "Con saldo pendiente", cada estado) y por sucursal, con el total por cobrar.
    - **Detalle:** botón para avanzar al siguiente paso (**En tienda → Pasar a proceso → Entregar al cliente**), registro de pagos, historial y pagos con su autor.
    - **Solo admin:** regresar un paso, cancelar con motivo, reasignar chofer y anular pagos.
    - Al entregar con saldo pendiente se pide confirmación.
-5. **Tema oscuro:** guardado en `localStorage` (es su único uso).
-6. **Keep-Alive:** GitHub Actions corre `scripts/keep-alive.mjs` cada 2 días y `GET /api/keep-alive` sirve para monitores externos. Ambos hacen una consulta de solo lectura.
+6. **Tema oscuro:** botón en el menú del panel, guardado en `localStorage` (es su único uso).
+7. **Keep-Alive:** GitHub Actions corre `scripts/keep-alive.mjs` cada 2 días y `GET /api/keep-alive` sirve para monitores externos. Ambos hacen una consulta de solo lectura.
 
 ---
 
@@ -234,10 +248,10 @@ Pendiente de decidir: si la planta cobra por pedido o por kilo (permitiría calc
 
 ## Despliegue en Vercel
 
-Vercel construye y publica la app cada vez que se sube código a la rama `main` de GitHub (`tintoQuality/qualityFinanzas`).
+Vercel (proyecto `quality-finanzas-cjar`) construye y publica la app cada vez que se sube código a la rama `main` de GitHub (`jorgeMartinezNajera/qualityFinanzas`). URL: https://quality-finanzas-cjar.vercel.app
 
 **Una sola vez:**
-1. **Conectar GitHub con Vercel.** En vercel.com, entra a **Add New… → Project → Import Git Repository**. Si no aparece el repositorio, elige **Install GitHub App** y dale acceso a la cuenta `tintoQuality` (o solo al repositorio `qualityFinanzas`).
+1. **Conectar GitHub con Vercel.** En vercel.com, entra a **Add New… → Project → Import Git Repository**. Si no aparece el repositorio, elige **Install GitHub App** y dale acceso al repositorio `qualityFinanzas`. Importa el proyecto **una sola vez**: cada proyecto conectado al mismo repositorio se construye en cada push, y uno sin variables falla y marca ❌ en GitHub.
 2. **Importar el repositorio** `qualityFinanzas`. Vercel detecta Next.js; deja los comandos por defecto. No hace falta cambiar el *Root Directory*: el repositorio ya es la carpeta `tintoreria-app`.
 3. **Variables de entorno** (en la misma pantalla o en *Settings → Environment Variables*), para *Production* y *Preview*:
    - `NEXT_PUBLIC_SUPABASE_URL`
@@ -278,6 +292,24 @@ La app corre en `http://localhost:3000`.
 
 ## Registro de cambios
 
+### 2026-11-08 — Panel común: navegación sin recargas
+- **Antes:** Pedidos y Personal se abrían con enlaces `<a>` que recargaban toda la app, y cada página volvía a verificar la sesión en 3 o 4 consultas seguidas ("Cargando pedidos…"). Además tenían otro diseño y un botón "← Finanzas".
+- **Ahora:**
+  - `src/app/(panel)/layout.js` agrupa `/finanzas`, `/pedidos` y `/usuarios` (las URLs no cambian), con menú lateral, encabezado, selector de sucursal, modo oscuro y cierre de sesión.
+  - La sesión se carga una vez desde el navegador (`getPerfilRapido`, sin viaje a Supabase Auth; RLS sigue validando cada consulta).
+  - El menú usa `<Link>` con precarga.
+- **Nuevos:**
+  - `src/components/panel/PanelProvider.js`: contexto con usuario, sucursales, sucursal activa, caché en memoria y espacio en el encabezado para el saldo.
+  - `src/components/panel/Esqueleto.js` y `src/app/(panel)/loading.js`: esqueletos animados (respetan "reducir movimiento").
+- **Finanzas:**
+  - La vista va en la URL (`?vista=todos`, `?vista=reportes`).
+  - El archivo pasó de ~1,850 a ~1,670 líneas al salir el menú, el encabezado y la sesión.
+  - Los movimientos se guardan por sucursal: cambiar de sucursal y regresar es instantáneo.
+- **Pedidos y Personal:**
+  - Sin encabezado propio ni carga de sesión.
+  - El filtro de sucursal ahora es el del encabezado.
+  - Personal filtra por la sucursal elegida (los superadmins siempre aparecen).
+
 ### 2026-11-07 — Pedidos con 3 estados y guía de Vercel
 - Los pedidos pasan de 7 estados a 3: **En tienda → En proceso → Entregado** (más *Cancelado*, solo admin). **Nuevo** `supabase/fase3c_tres_estados.sql`:
   - convierte los pedidos existentes: `recibido` pasa a `en_tienda`, y `enviado_planta`, `en_planta`, `de_regreso` y `listo` pasan a `en_proceso`;
@@ -286,7 +318,7 @@ La app corre en `http://localhost:3000`.
 - `src/lib/pedidos.js` y `/pedidos` usan los nuevos estados; los botones son "Pasar a proceso" y "Entregar al cliente".
 - **Nueva** sección "Despliegue en Vercel" en este README.
 - Se quitó de la URL del remoto `origin` un token de GitHub que estaba guardado en texto plano (ya era inválido). La autenticación ahora la hace Git Credential Manager con inicio de sesión en el navegador.
-- Todo el trabajo de las fases 1 a 3 quedó en la rama `sucursales-y-pedidos`, pendiente de subir a GitHub.
+- Fases 1 a 3 publicadas en producción: repositorio `jorgeMartinezNajera/qualityFinanzas` (PR #1), proyecto de Vercel `quality-finanzas-cjar` → `https://quality-finanzas-cjar.vercel.app`. El repositorio `tintoQuality/qualityFinanzas` queda como `upstream`, con la versión anterior.
 
 ### 2026-11-07 — Fase 3 aplicada en Supabase
 - `fase3_pedidos.sql` ejecutado y verificado: tablas con RLS, 4 triggers, vista `pedidos_resumen` con `security_invoker`, RPC solo para usuarios con sesión. Se eliminó `movimientos_chofer`.

@@ -1,10 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { getAccessToken, getUsuarioActual } from '@/lib/session'
-import { NOMBRE_ROL, correoInterno, esAdministrador, puedeGestionar, rolesQuePuedeCrear, rutaInicio } from '@/lib/permisos'
+import { getAccessToken } from '@/lib/session'
+import { NOMBRE_ROL, correoInterno, puedeGestionar, rolesQuePuedeCrear } from '@/lib/permisos'
+import { TODAS, usePanel } from '@/components/panel/PanelProvider'
+import { EsqueletoTabla } from '@/components/panel/Esqueleto'
 
 const formInicial = { nombre: '', alias: '', rol: 'chofer', sucursal_id: '' }
 
@@ -19,39 +20,34 @@ async function llamarApi(method, body) {
 }
 
 export default function UsuariosPage() {
-  const router = useRouter()
-  const [yo, setYo] = useState(null)
-  const [personas, setPersonas] = useState([])
-  const [sucursales, setSucursales] = useState([])
+  // Sesión y sucursales vienen del layout del panel; solo admin y superadmin llegan aquí.
+  const { usuario: yo, sucursales, sucursalActiva, leerCache, guardarCache } = usePanel()
+  const [personas, setPersonas] = useState(() => leerCache('personas') || null)  // null = aún no llegan
   const [form, setForm] = useState(formInicial)
   const [codigoNuevo, setCodigoNuevo] = useState(null) // { nombre, alias, codigo }
   const [error, setError] = useState('')
   const [enviando, setEnviando] = useState(false)
-  const [cargando, setCargando] = useState(true)
 
   const cargar = useCallback(async () => {
-    const usuario = await getUsuarioActual()
-    if (!usuario) { router.replace('/'); return }
-    if (!esAdministrador(usuario)) { router.replace(rutaInicio(usuario)); return }
-    setYo(usuario)
-
-    const [{ data: filas, error: e1 }, { data: sucs, error: e2 }] = await Promise.all([
-      supabase.from('usuarios')
-        .select('id, nombre, alias, rol, activo, sucursal_id, sucursal:sucursal_id(nombre)')
-        .not('auth_user_id', 'is', null)
-        .order('rol').order('nombre'),
-      supabase.from('sucursales').select('id, nombre').eq('activa', true).order('nombre'),
-    ])
-    if (e1 || e2) setError((e1 || e2).message)
+    const { data: filas, error: e } = await supabase.from('usuarios')
+      .select('id, nombre, alias, rol, activo, sucursal_id, sucursal:sucursal_id(nombre)')
+      .not('auth_user_id', 'is', null)
+      .order('rol').order('nombre')
+    if (e) { setError(e.message); return }
     setPersonas(filas || [])
-    setSucursales(sucs || [])
-    setCargando(false)
-  }, [router])
+    guardarCache('personas', filas || [])
+  }, [guardarCache])
 
   useEffect(() => {
     const timer = setTimeout(cargar, 0)
     return () => clearTimeout(timer)
   }, [cargar])
+
+  const cargando = personas === null
+  // El superadmin filtra con el selector de sucursal del encabezado; los superadmins siempre se listan.
+  const visibles = useMemo(() => (personas || []).filter(p =>
+    sucursalActiva === TODAS || p.rol === 'superadmin' || p.sucursal_id === sucursalActiva
+  ), [personas, sucursalActiva])
 
   async function crear(event) {
     event.preventDefault()
@@ -93,24 +89,16 @@ export default function UsuariosPage() {
     await cargar()
   }
 
-  if (cargando) return <main className="extension-page"><p>Cargando personal…</p></main>
-
   const rolesPermitidos = rolesQuePuedeCrear(yo)
   const eligeSucursal = yo.rol === 'superadmin' && form.rol !== 'superadmin'
 
   return (
     <main className="extension-page">
-      <header className="extension-header">
-        <div>
-          <button type="button" className="back-link" onClick={() => router.push('/finanzas')}>← Finanzas</button>
-          <h1>Personal</h1>
-          <p>
-            {yo.rol === 'superadmin'
-              ? 'Alta y control de acceso en todas las sucursales.'
-              : `Alta y control de acceso en ${yo.sucursal?.nombre || 'tu sucursal'}.`}
-          </p>
-        </div>
-      </header>
+      <p className="extension-hint">
+        {yo.rol === 'superadmin'
+          ? 'Alta y control de acceso en todas las sucursales.'
+          : `Alta y control de acceso en ${yo.sucursal?.nombre || 'tu sucursal'}.`}
+      </p>
 
       {error && <p className="extension-alert error" role="alert">{error}</p>}
       {codigoNuevo && (
@@ -174,14 +162,16 @@ export default function UsuariosPage() {
       </section>
 
       <section className="extension-card">
-        <div className="operations-header"><h2>Personal registrado</h2><span className="count-badge">{personas.length} personas</span></div>
+        <div className="operations-header"><h2>Personal registrado</h2><span className="count-badge">{cargando ? 'Cargando…' : `${visibles.length} personas`}</span></div>
         <div className="table-wrap">
           <table className="operations-table">
             <thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Sucursal</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody>
-              {personas.length === 0 ? (
+              {cargando ? (
+                <tr><td colSpan="6"><EsqueletoTabla filas={4} columnas={5} /></td></tr>
+              ) : visibles.length === 0 ? (
                 <tr><td colSpan="6">Aún no hay personal registrado.</td></tr>
-              ) : personas.map(p => {
+              ) : visibles.map(p => {
                 const gestionable = puedeGestionar(yo, p)
                 return (
                   <tr key={p.id}>
