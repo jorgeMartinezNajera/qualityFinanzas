@@ -1,10 +1,10 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { getUsuarioActual } from '@/lib/session'
-import { NOMBRE_ROL, esAdministrador } from '@/lib/permisos'
+import { esAdministrador } from '@/lib/permisos'
+import { TODAS, usePanel } from '@/components/panel/PanelProvider'
+import { EsqueletoTabla } from '@/components/panel/Esqueleto'
 import {
   ACCION_SIGUIENTE, METODOS_PAGO, NOMBRE_ESTADO, NOMBRE_PAGO, ORDEN_ESTADOS,
   dinero, estaCerrado, fechaCorta, fechaHora, hoyISO, siguienteEstado,
@@ -21,22 +21,21 @@ function formInicial(sucursalId) {
 }
 
 export default function PedidosPage() {
-  const router = useRouter()
-  const [yo, setYo] = useState(null)
-  const [sucursales, setSucursales] = useState([])
-  const [choferes, setChoferes] = useState([])
-  const [pedidos, setPedidos] = useState([])
-  const [form, setForm] = useState(formInicial(''))
+  // Sesión, sucursales y sucursal activa vienen del layout del panel (ya cargados).
+  const { usuario: yo, sucursales, sucursalActiva, leerCache, guardarCache } = usePanel()
+  const [choferes, setChoferes] = useState(() => leerCache('choferes') || [])
+  const [pedidos, setPedidos] = useState(() => leerCache('pedidos') || null)  // null = aún no llegan
+  const [form, setForm] = useState(() => formInicial(
+    yo.rol === 'admin' ? yo.sucursal_id : (sucursalActiva !== TODAS ? sucursalActiva : '')
+  ))
   const [cliente, setCliente] = useState(null) // { id, nombre } si el teléfono ya existe; false si es nuevo
   const [filtroEstado, setFiltroEstado] = useState('activos')
-  const [filtroSucursal, setFiltroSucursal] = useState('todas')
   const [seleccion, setSeleccion] = useState(null) // id del pedido abierto en el detalle
   const [detalle, setDetalle] = useState({ pagos: [], eventos: [] })
   const [pago, setPago] = useState({ monto: '', metodoPago: 'efectivo' })
   const [mensaje, setMensaje] = useState('')
   const [error, setError] = useState('')
   const [enviando, setEnviando] = useState(false)
-  const [cargando, setCargando] = useState(true)
 
   const esAdmin = esAdministrador(yo)
   const esChofer = yo?.rol === 'chofer'
@@ -46,9 +45,10 @@ export default function PedidosPage() {
   const cargarPedidos = useCallback(async () => {
     const { data, error: e } = await supabase
       .from('pedidos_resumen').select('*').order('creado_en', { ascending: false }).limit(300)
-    if (e) setError(e.message)
-    else setPedidos(data || [])
-  }, [])
+    if (e) { setError(e.message); return }
+    setPedidos(data || [])
+    guardarCache('pedidos', data || [])
+  }, [guardarCache])
 
   const cargarDetalle = useCallback(async (pedidoId) => {
     const [{ data: pagos }, { data: eventos }] = await Promise.all([
@@ -64,35 +64,27 @@ export default function PedidosPage() {
 
   useEffect(() => {
     let activo = true
-    async function iniciar() {
-      const usuario = await getUsuarioActual()
-      if (!activo) return
-      if (!usuario) { router.replace('/'); return }
-      setYo(usuario)
-      setForm(formInicial(usuario.rol === 'admin' ? usuario.sucursal_id : ''))
-      const [{ data: sucs }, { data: chs }] = await Promise.all([
-        supabase.from('sucursales').select('id, nombre').eq('activa', true).order('nombre'),
-        supabase.from('usuarios').select('id, nombre').eq('rol', 'chofer').eq('activo', true).order('nombre'),
-      ])
-      if (!activo) return
-      setSucursales(sucs || [])
-      setChoferes(chs || [])
-      await cargarPedidos()
-      if (activo) setCargando(false)
-    }
-    iniciar()
-    return () => { activo = false }
-  }, [router, cargarPedidos])
+    const timer = setTimeout(cargarPedidos, 0)
+    supabase.from('usuarios').select('id, nombre').eq('rol', 'chofer').eq('activo', true).order('nombre')
+      .then(({ data }) => {
+        if (!activo || !data) return
+        setChoferes(data)
+        guardarCache('choferes', data)
+      })
+    return () => { activo = false; clearTimeout(timer) }
+  }, [cargarPedidos, guardarCache])
 
-  const visibles = useMemo(() => pedidos.filter(p => {
-    if (filtroSucursal !== 'todas' && p.sucursal_id !== filtroSucursal) return false
+  const cargando = pedidos === null
+  // El filtro de sucursal es el selector del encabezado del panel.
+  const visibles = useMemo(() => (pedidos || []).filter(p => {
+    if (sucursalActiva !== TODAS && p.sucursal_id !== sucursalActiva) return false
     if (filtroEstado === 'activos') return !estaCerrado(p.estado)
     if (filtroEstado === 'con_saldo') return p.estado !== 'cancelado' && Number(p.saldo) > 0
     if (filtroEstado === 'todos') return true
     return p.estado === filtroEstado
-  }), [pedidos, filtroEstado, filtroSucursal])
+  }), [pedidos, filtroEstado, sucursalActiva])
 
-  const pedidoAbierto = pedidos.find(p => p.id === seleccion) || null
+  const pedidoAbierto = (pedidos || []).find(p => p.id === seleccion) || null
 
   function avisar(texto) { setError(''); setMensaje(texto) }
   function fallar(texto) { setMensaje(''); setError(texto) }
@@ -150,7 +142,7 @@ export default function PedidosPage() {
   async function abrir(id) {
     if (seleccion === id) { setSeleccion(null); return }
     setSeleccion(id)
-    const p = pedidos.find(x => x.id === id)
+    const p = (pedidos || []).find(x => x.id === id)
     setPago({ monto: p ? String(Number(p.saldo)) : '', metodoPago: 'efectivo' })
     await cargarDetalle(id)
   }
@@ -221,26 +213,10 @@ export default function PedidosPage() {
     await refrescar(p.id)
   }
 
-  async function salir() {
-    await supabase.auth.signOut()
-    router.replace('/')
-  }
-
-  if (cargando) return <main className="extension-page"><p>Cargando pedidos…</p></main>
-
   const totalPendiente = visibles.reduce((s, p) => s + (p.estado === 'cancelado' ? 0 : Number(p.saldo)), 0)
 
   return (
     <main className="extension-page">
-      <header className="extension-header">
-        <div>
-          {esAdmin && <button type="button" className="back-link" onClick={() => router.push('/finanzas')}>← Finanzas</button>}
-          <h1>Pedidos</h1>
-          <p>{yo.nombre} · {NOMBRE_ROL[yo.rol]}{yo.sucursal?.nombre && yo.rol === 'admin' ? ` · ${yo.sucursal.nombre}` : ''}</p>
-        </div>
-        <button type="button" className="btn btn-ghost" onClick={salir}>Cerrar sesión</button>
-      </header>
-
       {error && <p className="extension-alert error" role="alert">{error}</p>}
       {mensaje && <p className="extension-alert success">{mensaje}</p>}
 
@@ -323,7 +299,7 @@ export default function PedidosPage() {
       <section className="extension-card">
         <div className="operations-header">
           <h2>{esChofer ? 'Mis pedidos' : 'Pedidos'}</h2>
-          <span className="count-badge">{visibles.length} pedidos · por cobrar {dinero(totalPendiente)}</span>
+          <span className="count-badge">{cargando ? 'Cargando…' : `${visibles.length} pedidos · por cobrar ${dinero(totalPendiente)}`}</span>
         </div>
         <div className="extension-form-row pedidos-filtros">
           <label>Estado
@@ -334,20 +310,14 @@ export default function PedidosPage() {
               <option value="todos">Todos</option>
             </select>
           </label>
-          {sucursales.length > 1 && (
-            <label>Sucursal
-              <select value={filtroSucursal} onChange={e => setFiltroSucursal(e.target.value)}>
-                <option value="todas">Todas</option>
-                {sucursales.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-              </select>
-            </label>
-          )}
         </div>
         <div className="table-wrap">
           <table className="operations-table">
             <thead><tr><th>Folio</th><th>Cliente</th><th>Sucursal</th><th>Entrega</th><th>Chofer</th><th>Total</th><th>Saldo</th><th>Estado</th><th></th></tr></thead>
             <tbody>
-              {visibles.length === 0 ? (
+              {cargando ? (
+                <tr><td colSpan="9"><EsqueletoTabla filas={5} columnas={6} /></td></tr>
+              ) : visibles.length === 0 ? (
                 <tr><td colSpan="9">No hay pedidos con estos filtros.</td></tr>
               ) : visibles.map(p => (
                 <tr key={p.id} className={seleccion === p.id ? 'pedido-seleccionado' : ''}>

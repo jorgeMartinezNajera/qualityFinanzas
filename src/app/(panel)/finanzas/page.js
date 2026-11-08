@@ -1,9 +1,9 @@
 'use client'
-import { useState, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { getUsuarioActual } from '@/lib/session'
-import { NOMBRE_ROL, esAdministrador, rutaInicio } from '@/lib/permisos'
+import { TODAS, usePanel } from '@/components/panel/PanelProvider'
+import { EsqueletoTabla } from '@/components/panel/Esqueleto'
 
 const MOV_COLUMNAS = [
   'id, numero, sucursal_id, tipo, monto, concepto, fecha, metodo_pago, origen, anulado, motivo_anulacion, creado_en, categoria_id',
@@ -12,7 +12,7 @@ const MOV_COLUMNAS = [
   'autor:usuarios!movimientos_creado_por_fkey(nombre)',
 ].join(', ')
 
-const TODAS = 'todas'
+const SIN_DATOS = []
 const NUEVA_CATEGORIA = '__nueva__'
 const METODOS_PAGO = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia' }
 const CATEGORIA_COLUMNAS = 'id, nombre, tipo, sucursal_id'
@@ -39,32 +39,6 @@ function hoyISO() {
 
 function formInicialMovimiento(sucursalId) {
   return { monto:'', tipo:'entrada', categoriaId:'', nuevaCategoria:'', concepto:'', fecha: hoyISO(), metodoPago:'efectivo', sucursalId }
-}
-
-function subscribeDarkMode(callback) {
-  window.addEventListener('storage', callback)
-  window.addEventListener('darkmode-change', callback)
-  return () => {
-    window.removeEventListener('storage', callback)
-    window.removeEventListener('darkmode-change', callback)
-  }
-}
-function getDarkModeSnapshot() {
-  if (typeof window === 'undefined') return false
-  return localStorage.getItem('darkMode') === 'true'
-}
-function getDarkModeServerSnapshot() {
-  return false
-}
-
-function subscribeMounted() {
-  return () => {}
-}
-function getMountedSnapshot() {
-  return true
-}
-function getMountedServerSnapshot() {
-  return false
 }
 
 const PALETTE = ['#6d5cff','#ff6b9d','#38bdf8','#22c1a4','#ffb454','#f97316','#8b5cf6','#ef4444']
@@ -99,8 +73,6 @@ const SORT_OPTIONS = [
   { value: 'amount-asc', label: 'Monto ↑ (Menor a mayor)' },
   { value: 'amount-desc', label: 'Monto ↓ (Mayor a menor)' },
 ]
-
-const VIEW_SUBTITLES = { resumen:'Resumen', todos:'Todos los registros', reportes:'Reportes' }
 
 const REPORT_TABS = [
   { value: 'frecuencia', label: 'Frecuencia por categoría' },
@@ -436,9 +408,17 @@ function TotalesCard({ totales }) {
 }
 
 export default function Finanzas() {
-  const router = useRouter()
-  const [movements, setMovements] = useState([])
-  const [loading, setLoading] = useState(true)
+  const {
+    usuario, sucursales, sucursalActiva, esVistaGlobal, nombreSucursalActiva,
+    setEncabezadoExtra, leerCache, guardarCache,
+  } = usePanel()
+  const currentUser = usuario
+
+  // Movimientos por sucursal: al cambiar de sucursal o volver a esta sección se muestran
+  // los últimos datos al instante mientras se recargan.
+  const [porSucursal, setPorSucursal] = useState(() => leerCache('movimientos') || {})
+  const movements = porSucursal[sucursalActiva] || SIN_DATOS
+  const loading = !(sucursalActiva in porSucursal)
   const [loadError, setLoadError] = useState(false)
   const [filters, setFilters] = useState({
     period: 'all',
@@ -448,35 +428,12 @@ export default function Finanzas() {
     endDate: '',
   })
   const [chartType, setChartType] = useState('salida')
-  const [currentView, setCurrentView] = useState('resumen')
+  // Resumen / Todos los registros / Reportes viven en la URL (?vista=...): el menú del panel navega sin recargar.
+  const currentView = useSearchParams().get('vista') || 'resumen'
   const [reportType, setReportType] = useState('frecuencia')
   const [reportPeriod, setReportPeriod] = useState('all')
   const [reportStartDate, setReportStartDate] = useState('')
   const [reportEndDate, setReportEndDate] = useState('')
-  const [drawerOpen, setDrawerOpen] = useState(false)
-
-  const darkMode = useSyncExternalStore(subscribeDarkMode, getDarkModeSnapshot, getDarkModeServerSnapshot)
-  const mounted = useSyncExternalStore(subscribeMounted, getMountedSnapshot, getMountedServerSnapshot)
-
-  /* ── Dark mode sync ── */
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-  }, [darkMode])
-
-  function toggleDarkMode() {
-    const next = !darkMode
-    localStorage.setItem('darkMode', String(next))
-    if (next) {
-      document.documentElement.classList.add('dark')
-    } else {
-      document.documentElement.classList.remove('dark')
-    }
-    window.dispatchEvent(new Event('darkmode-change'))
-  }
 
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [addModalShown, setAddModalShown] = useState(false)
@@ -504,77 +461,59 @@ export default function Finanzas() {
   const montoRef = useRef(null)
   const editCategoriaRef = useRef(null)
 
-  const [currentUser, setCurrentUser] = useState({ id: '', nombre: '', rol: '', sucursalId: null })
-  const [sucursales, setSucursales] = useState([])
-  const [sucursalActiva, setSucursalActiva] = useState(null)
-  const [catalogo, setCatalogo] = useState([])
+  const [catalogo, setCatalogo] = useState(() => leerCache('categorias') || [])
 
-  /* ── Sesión (validada por Supabase Auth), sucursales y catálogo ── */
+  /* ── Datos (la sesión y las sucursales las carga el layout del panel) ── */
   /* El aislamiento por sucursal lo garantiza RLS (supabase/fase2_finanzas_sucursal.sql). */
+
+  function guardarMovimientos(sucursalId, filas) {
+    setPorSucursal(prev => {
+      const next = { ...prev, [sucursalId]: filas }
+      guardarCache('movimientos', next)
+      return next
+    })
+  }
 
   useEffect(() => {
     let active = true
-    async function cargarSesion() {
-      try {
-        const usuario = await getUsuarioActual()
-        if (!active) return
-        if (!usuario) { router.replace('/'); return }
-        if (!esAdministrador(usuario)) { router.replace(rutaInicio(usuario)); return }
-        setCurrentUser({ id: usuario.id, nombre: usuario.nombre || 'Usuario', rol: usuario.rol, sucursalId: usuario.sucursal_id })
-        const [{ data: sucs }, { data: cats }] = await Promise.all([
-          supabase.from('sucursales').select('id, nombre').eq('activa', true).order('nombre'),
-          fetchCategorias(),
-        ])
-        if (!active) return
-        setSucursales(sucs || [])
-        setCatalogo(cats || [])
-        setSucursalActiva(usuario.rol === 'superadmin' ? TODAS : usuario.sucursal_id)
-      } catch {
-        if (active) router.replace('/')
-      }
-    }
-    cargarSesion()
+    fetchCategorias().then(({ data }) => {
+      if (!active || !data) return
+      setCatalogo(data)
+      guardarCache('categorias', data)
+    })
     return () => { active = false }
-  }, [router])
+  }, [guardarCache])
 
   /* Movimientos de la sucursal activa (se recargan al cambiarla). */
   useEffect(() => {
-    if (!sucursalActiva) return
     let active = true
     fetchMovimientos(sucursalActiva).then(({ data, error }) => {
       if (!active) return
-      if (error) { setLoadError(true); setLoading(false); return }
+      if (error) { setLoadError(true); return }
       setLoadError(false)
-      setMovements(data.map(mapRow))
-      setLoading(false)
+      setPage(1)
+      setPorSucursal(prev => {
+        const next = { ...prev, [sucursalActiva]: data.map(mapRow) }
+        guardarCache('movimientos', next)
+        return next
+      })
     })
     return () => { active = false }
-  }, [sucursalActiva])
-
-  async function handleLogout() {
-    await supabase.auth.signOut()
-    router.replace('/')
-  }
+  }, [sucursalActiva, guardarCache])
 
   async function reload() {
     setLoadError(false)
-    if (!sucursalActiva) return
     const { data, error } = await fetchMovimientos(sucursalActiva)
-    if (error) { setLoadError(true); setLoading(false); return }
-    setMovements(data.map(mapRow))
-    setLoading(false)
+    if (error) { setLoadError(true); return }
+    guardarMovimientos(sucursalActiva, data.map(mapRow))
   }
 
   async function recargarCatalogo() {
     const { data } = await fetchCategorias()
     setCatalogo(data || [])
+    guardarCache('categorias', data || [])
     return data || []
   }
-
-  const esVistaGlobal = sucursalActiva === TODAS
-  const nombreSucursalActiva = esVistaGlobal
-    ? 'Ambas sucursales'
-    : (sucursales.find(x => x.id === sucursalActiva)?.nombre || '')
 
   function categoriasPara(sucursalId, tipo) {
     return catalogo.filter(c => c.sucursal_id === sucursalId && c.tipo === tipo)
@@ -606,6 +545,17 @@ export default function Finanzas() {
     () => movements.filter(m => !m.retirado).reduce((s,m) => m.tipo === 'entrada' ? s + m.amount : s - m.amount, 0),
     [movements]
   )
+
+  // El saldo se muestra en el encabezado común del panel mientras esta sección está abierta.
+  useEffect(() => {
+    setEncabezadoExtra(
+      <div className="balance-pill">
+        <span className="balance-label">Saldo</span>
+        <span className="balance-value">{loading ? '…' : `$${formatMoney(balance)}`}</span>
+      </div>
+    )
+  }, [balance, loading, setEncabezadoExtra])
+  useEffect(() => () => setEncabezadoExtra(null), [setEncabezadoExtra])
 
   const monthTitle = useMemo(() => {
     const d = new Date()
@@ -975,7 +925,6 @@ export default function Finanzas() {
       if (editModalOpen) closeEditModal()
       setMenuTarget(null)
       setConfirmTarget(null)
-      setDrawerOpen(false)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -1147,6 +1096,9 @@ export default function Finanzas() {
   }
 
   function renderTable(data) {
+    if (loading) {
+      return <tr className="empty-row"><td colSpan="7"><EsqueletoTabla filas={6} columnas={5} /></td></tr>
+    }
     if (!data.length) {
       return <tr className="empty-row"><td colSpan="7">No hay movimientos que coincidan con los filtros seleccionados.</td></tr>
     }
@@ -1297,138 +1249,7 @@ export default function Finanzas() {
   /* ═══════════════════ Render ═══════════════════ */
 
   return (
-    <div className="app">
-
-      {/* ── Drawer de navegación ── */}
-      <div
-        className={`drawer-overlay ${drawerOpen ? 'show' : ''}`}
-        hidden={!drawerOpen}
-        onClick={e => { if (e.target === e.currentTarget) setDrawerOpen(false) }}
-      >
-        <nav className="drawer">
-          <div className="drawer-header">
-            <span className="drawer-brand">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-              Finanzas
-            </span>
-            <button className="drawer-close" onClick={() => setDrawerOpen(false)} aria-label="Cerrar menú">&times;</button>
-          </div>
-
-          <div className="drawer-user-card">
-            <div className="drawer-user-avatar">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-              </svg>
-            </div>
-            <div className="drawer-user-info">
-              <span className="drawer-user-name">{currentUser.nombre || 'Mi Cuenta'}</span>
-              <span className="drawer-user-badge">{NOMBRE_ROL[currentUser.rol] || 'Cuenta Activa'}</span>
-            </div>
-          </div>
-
-          <ul className="drawer-nav">
-            <li>
-              <a
-                href="#"
-                className={`drawer-link ${currentView === 'resumen' ? 'active' : ''}`}
-                onClick={e => { e.preventDefault(); setCurrentView('resumen'); setDrawerOpen(false); setMenuTarget(null) }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-                Resumen
-              </a>
-            </li>
-            {esAdministrador(currentUser) && (
-              <li>
-                <a href="/usuarios" className="drawer-link" onClick={() => setDrawerOpen(false)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                  Personal
-                </a>
-              </li>
-            )}
-            {esAdministrador(currentUser) && (
-              <li>
-                <a href="/pedidos" className="drawer-link" onClick={() => setDrawerOpen(false)}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="7" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M16 3l5 5-5 5"/><path d="M21 8h-8"/></svg>
-                  Pedidos
-                </a>
-              </li>
-            )}
-            <li>
-              <a
-                href="#"
-                className={`drawer-link ${currentView === 'todos' ? 'active' : ''}`}
-                onClick={e => { e.preventDefault(); setCurrentView('todos'); setDrawerOpen(false); setMenuTarget(null) }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-                Todos los registros
-              </a>
-            </li>
-            <li>
-              <a
-                href="#"
-                className={`drawer-link ${currentView === 'reportes' ? 'active' : ''}`}
-                onClick={e => { e.preventDefault(); setCurrentView('reportes'); setDrawerOpen(false); setMenuTarget(null); setReportType('frecuencia') }}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-                Reportes
-              </a>
-            </li>
-          </ul>
-          <div className="drawer-footer">
-            <button className="theme-toggle" onClick={toggleDarkMode}>
-              {darkMode ? (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-              ) : (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-              )}
-              <span>{darkMode ? 'Modo claro' : 'Modo oscuro'}</span>
-            </button>
-            <button className="theme-toggle" onClick={handleLogout}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-              <span>Cerrar sesión</span>
-            </button>
-          </div>
-        </nav>
-      </div>
-
-      {/* ── Encabezado ── */}
-      <header className="app-header">
-        <button className="hamburger" onClick={() => setDrawerOpen(true)} aria-label="Abrir menú">
-          <span></span><span></span><span></span>
-        </button>
-        <div>
-          <h1 className="app-title">Finanzas</h1>
-          <p className="app-subtitle">{VIEW_SUBTITLES[currentView]}</p>
-        </div>
-        {currentUser.rol === 'superadmin' ? (
-          <select
-            className="sucursal-select"
-            aria-label="Sucursal"
-            value={sucursalActiva || TODAS}
-            onChange={e => { setSucursalActiva(e.target.value); setPage(1) }}
-          >
-            <option value={TODAS}>Ambas sucursales</option>
-            {sucursales.map(x => <option key={x.id} value={x.id}>{x.nombre}</option>)}
-          </select>
-        ) : (
-          <span className="sucursal-label">{nombreSucursalActiva}</span>
-        )}
-        <div className="header-account-group">
-          <div className="account-user-pill" title={`Cuenta activa: ${currentUser.nombre} (${currentUser.rol})`}>
-            <span className="account-user-avatar">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ width:14, height:14 }}>
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-              </svg>
-            </span>
-            <span className="account-user-name">{currentUser.nombre || 'Usuario'}</span>
-          </div>
-          <div className="balance-pill">
-            <span className="balance-label">Saldo</span>
-            <span className="balance-value">${formatMoney(balance)}</span>
-          </div>
-        </div>
-      </header>
-
+    <>
       {loadError && (
         <div className="error-banner" role="alert">
           <span>No se pudieron cargar los movimientos. Revisa tu conexión.</span>
@@ -1842,6 +1663,6 @@ export default function Finanzas() {
       <div className={`toast ${toast.show ? 'show' : ''}`} role="status" aria-live="polite" hidden={!toast.mounted}>
         {toast.message}
       </div>
-    </div>
+    </>
   )
 }
