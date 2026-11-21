@@ -10,17 +10,48 @@ export default function LoginPage() {
   const [codigo, setCodigo] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [isFocused, setIsFocused] = useState(false)
+  const [aliasFocused, setAliasFocused] = useState(false)
+  const [codigoFocused, setCodigoFocused] = useState(false)
+  const [aliasStatus, setAliasStatus] = useState(null)
+  const [codigoStatus, setCodigoStatus] = useState(null)
   const router = useRouter()
+
+  const validarAlias = () => {
+    const cleanAlias = alias.trim().toLowerCase()
+    if (!cleanAlias) {
+      setAliasStatus({ tipo: 'error', texto: 'Ingresa tu usuario.' })
+      return false
+    }
+    if (!ALIAS_REGEX.test(cleanAlias)) {
+      setAliasStatus({ tipo: 'error', texto: 'Usa de 3 a 30 caracteres: letras, números, . _ o -.' })
+      return false
+    }
+    setAliasStatus({ tipo: 'success', texto: 'Usuario con formato válido.' })
+    return true
+  }
+
+  const validarCodigo = () => {
+    if (!codigo) {
+      setCodigoStatus({ tipo: 'error', texto: 'Ingresa tu código de acceso.' })
+      return false
+    }
+    if (!CODIGO_REGEX.test(codigo)) {
+      setCodigoStatus({ tipo: 'error', texto: 'El código debe tener exactamente 6 dígitos.' })
+      return false
+    }
+    setCodigoStatus({ tipo: 'success', texto: 'Código con formato válido.' })
+    return true
+  }
 
   const handleLogin = async (e) => {
     e?.preventDefault()
-    setError('')
+    setAliasStatus(null)
+    setCodigoStatus(null)
 
     const cleanAlias = alias.trim().toLowerCase()
-    if (!ALIAS_REGEX.test(cleanAlias) || !CODIGO_REGEX.test(codigo)) {
-      setError('Ingresa tu usuario y tu código de 6 dígitos')
+    const aliasValido = validarAlias()
+    const codigoValido = validarCodigo()
+    if (!aliasValido || !codigoValido) {
       return
     }
 
@@ -33,16 +64,21 @@ export default function LoginPage() {
       })
 
       if (authError || !authData.user) {
-        setError(authError?.code === 'user_banned'
-          ? 'Usuario inactivo. Contacta al administrador.'
-          : 'Usuario o código incorrectos')
+        if (authError?.code === 'user_banned') {
+          setAliasStatus({ tipo: 'error', texto: 'Usuario inactivo. Contacta al administrador.' })
+        } else {
+          setAliasStatus({ tipo: 'error', texto: 'Verifica que el usuario sea correcto.' })
+          setCodigoStatus({ tipo: 'error', texto: 'Verifica que el código sea correcto.' })
+        }
         return
       }
 
       const usuario = await getPerfilAutenticado()
       if (!usuario || !usuario.activo) {
         await supabase.auth.signOut()
-        setError(usuario ? 'Usuario inactivo. Contacta al administrador.' : 'Tu cuenta no tiene un perfil configurado. Contacta al administrador.')
+        setAliasStatus(usuario
+          ? { tipo: 'error', texto: 'Usuario inactivo. Contacta al administrador.' }
+          : { tipo: 'error', texto: 'Tu cuenta no tiene un perfil configurado.' })
         return
       }
 
@@ -50,7 +86,7 @@ export default function LoginPage() {
       router.push(rutaInicio(usuario))
     } catch (err) {
       console.error(err)
-      setError('Error al conectar con el servicio de acceso')
+      setCodigoStatus({ tipo: 'error', texto: 'No se pudo conectar con el servicio de acceso.' })
     } finally {
       setIsLoading(false)
     }
@@ -80,14 +116,25 @@ export default function LoginPage() {
         {/* Single Input Form */}
         <form onSubmit={handleLogin} className="quality-auth-form" noValidate>
           <label className="quality-field-label" htmlFor="quality-alias">Usuario</label>
-          <div className={`quality-input-wrapper ${isFocused ? 'focused' : ''}`}>
+          <div className={`quality-input-wrapper ${aliasFocused ? 'focused' : ''} ${aliasStatus?.tipo === 'error' ? 'invalid' : ''} ${aliasStatus?.tipo === 'success' ? 'valid' : ''}`}>
             <input
               id="quality-alias"
               type="text"
               value={alias}
-              onChange={(e) => setAlias(e.target.value)}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
+              onChange={(e) => {
+                const value = e.target.value
+                setAlias(value)
+                if (ALIAS_REGEX.test(value.trim().toLowerCase())) {
+                  setAliasStatus({ tipo: 'success', texto: 'Usuario con formato válido.' })
+                } else {
+                  setAliasStatus(null)
+                }
+              }}
+              onFocus={() => setAliasFocused(true)}
+              onBlur={() => {
+                setAliasFocused(false)
+                validarAlias()
+              }}
               placeholder="ej. jperez"
               className="quality-single-input"
               autoFocus
@@ -97,9 +144,26 @@ export default function LoginPage() {
               autoComplete="username"
             />
           </div>
+          {aliasStatus && (
+            <p className={`quality-field-status ${aliasStatus.tipo}`} role={aliasStatus.tipo === 'error' ? 'alert' : 'status'}>
+              {aliasStatus.tipo === 'success' ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M8 12l2.5 2.5L16.5 9" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+              )}
+              <span>{aliasStatus.texto}</span>
+            </p>
+          )}
 
           <label className="quality-field-label" htmlFor="quality-access-code">Código de acceso</label>
-          <div className={`quality-input-wrapper ${isFocused ? 'focused' : ''}`}>
+          <div className={`quality-input-wrapper ${codigoFocused ? 'focused' : ''} ${codigoStatus?.tipo === 'error' ? 'invalid' : ''} ${codigoStatus?.tipo === 'success' ? 'valid' : ''}`}>
             {/* Lock icon */}
             <svg
               className="quality-input-icon"
@@ -119,9 +183,20 @@ export default function LoginPage() {
               id="quality-access-code"
               type={showPassword ? 'text' : 'password'}
               value={codigo}
-              onChange={(e) => setCodigo(e.target.value.replace(/\D/g, '').slice(0, 6))}
-              onFocus={() => setIsFocused(true)}
-              onBlur={() => setIsFocused(false)}
+              onChange={(e) => {
+                const value = e.target.value.replace(/\D/g, '').slice(0, 6)
+                setCodigo(value)
+                if (CODIGO_REGEX.test(value)) {
+                  setCodigoStatus({ tipo: 'success', texto: 'Código con formato válido.' })
+                } else {
+                  setCodigoStatus(null)
+                }
+              }}
+              onFocus={() => setCodigoFocused(true)}
+              onBlur={() => {
+                setCodigoFocused(false)
+                validarCodigo()
+              }}
               placeholder="6 dígitos"
               className="quality-single-input"
               inputMode="numeric"
@@ -149,19 +224,24 @@ export default function LoginPage() {
               )}
             </button>
           </div>
-          <p className="quality-login-hint">¿Olvidaste tu código? Pide a tu administrador que te genere uno nuevo.</p>
-
-          {/* Error Message */}
-          {error && (
-            <div className="quality-error-msg" role="alert">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              <span>{error}</span>
-            </div>
+          {codigoStatus && (
+            <p className={`quality-field-status ${codigoStatus.tipo}`} role={codigoStatus.tipo === 'error' ? 'alert' : 'status'}>
+              {codigoStatus.tipo === 'success' ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M8 12l2.5 2.5L16.5 9" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+              )}
+              <span>{codigoStatus.texto}</span>
+            </p>
           )}
+          <p className="quality-login-hint">¿Olvidaste tu código? Pide a tu administrador que te genere uno nuevo.</p>
 
           {/* Solid White High-Contrast Submit Button */}
           <button
