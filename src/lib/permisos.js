@@ -23,7 +23,7 @@ export function esAdministrador(usuario) {
 
 /** Página de inicio según el rol. */
 export function rutaInicio(usuario) {
-  return usuario?.rol === 'chofer' ? '/pedidos' : '/finanzas'
+  return usuario?.rol === 'chofer' ? '/cobros' : '/finanzas'
 }
 
 /** Roles que `solicitante` puede dar de alta. */
@@ -35,13 +35,20 @@ export function rolesQuePuedeCrear(solicitante) {
 
 /**
  * Si `solicitante` puede modificar a `objetivo` (regenerar código, activar, desactivar).
- * Superadmin: a cualquiera. Admin: solo a admins y choferes de su sucursal.
+ * Superadmin: a cualquiera. Admin: a los admins de su sucursal y a todo el catálogo de choferes
+ * (los choferes no pertenecen a una sucursal: trabajan para ambas).
  */
 export function puedeGestionar(solicitante, objetivo) {
   if (!solicitante?.activo || !objetivo) return false
   if (solicitante.rol === 'superadmin') return true
   if (solicitante.rol === 'admin') {
-    return objetivo.rol !== 'superadmin' && objetivo.sucursal_id === solicitante.sucursal_id
+    if (objetivo.rol === 'chofer') return true
+    return objetivo.rol === 'admin' && objetivo.sucursal_id === solicitante.sucursal_id
   }
   return false
+}
+
+/** Solo los administradores pertenecen a una sucursal; superadmin y chofer no. */
+export function rolTieneSucursal(rol) {
+  return rol === 'admin'
 }

@@ -217,6 +217,37 @@ body:has(.quality-login-viewport) {
     inset 0 2px 4px rgba(0, 0, 0, 0.25);
 }
 
+.quality-input-wrapper.valid {
+  border-color: rgba(74, 222, 128, 0.55);
+  background: rgba(74, 222, 128, 0.055);
+}
+
+.quality-input-wrapper.invalid {
+  border-color: rgba(248, 113, 113, 0.7);
+  background: rgba(239, 68, 68, 0.07);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.05);
+}
+
+.quality-field-status {
+  min-height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -8px 2px 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.35;
+  animation: authFadeIn 0.2s ease-out;
+}
+
+.quality-field-status.success {
+  color: #86efac;
+}
+
+.quality-field-status.error {
+  color: #f87171;
+}
+
 .quality-input-icon {
   width: 18px;
   height: 18px;
@@ -398,6 +429,7 @@ body:has(.quality-login-viewport) {
 .extension-header p { color: var(--muted); margin: 0; }
 .back-link { background: transparent; border: 0; color: var(--violet); cursor: pointer; font: inherit; padding: 0; }
 .extension-grid { display: grid; gap: 20px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 20px; }
+.personal-alta { margin-bottom: 20px; }
 .extension-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-card); padding: 24px; }
 .extension-card h2 { font-size: 1.15rem; margin: 0 0 18px; }
 .extension-card label { color: var(--muted); display: flex; flex-direction: column; font-size: .8rem; font-weight: 700; gap: 6px; margin-bottom: 13px; }
@@ -407,6 +439,7 @@ body:has(.quality-login-viewport) {
 .extension-alert { border-radius: 10px; margin: 12px 0; padding: 12px 14px; }
 .extension-alert.error { background: var(--red-bg); color: var(--red); }
 .extension-alert.success { background: var(--green-bg); color: #087f6b; }
+.extension-alert.info { background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
 .extension-card .operations-header { margin-bottom: 14px; }
 .extension-hint { color: var(--muted); font-size: .8rem; margin: -4px 0 14px; }
 .extension-list { color: var(--muted); display: grid; gap: 10px; margin: 0; padding-left: 18px; }
@@ -3016,3 +3049,41 @@ body:has(.quality-login-viewport) {
   }
   .btn-export-excel { font-size: .85rem; padding: 11px 14px; }
 }
+
+/* ── Cobros del chofer ── */
+.cobros-page { margin: 0 auto; max-width: 560px; }
+.cobros-page .extension-card { margin-bottom: 20px; }
+.cobro-monto { align-items: center; display: flex; gap: 8px; }
+.cobro-monto > span { color: var(--ink); font-size: 1.6rem; font-weight: 700; }
+.cobro-form .cobro-monto input { flex: 1; font-size: 1.6rem; font-weight: 700; min-height: 56px; min-width: 0; }
+.cobro-metodos { border: 0; display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 4px 0 18px; padding: 0; }
+.cobro-metodos legend { color: var(--muted); font-size: .8rem; font-weight: 700; margin-bottom: 6px; padding: 0; }
+.cobro-metodo {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: .85rem;
+  font-weight: 700;
+  min-height: 52px;
+  padding: 8px 4px;
+}
+.cobro-metodo.activo { background: var(--violet); border-color: var(--violet); color: #fff; }
+.cobro-metodo:focus-visible { outline: 3px solid rgba(109,92,255,0.35); outline-offset: 2px; }
+.cobro-metodos:disabled .cobro-metodo { cursor: default; opacity: .7; }
+.cobro-enviar { justify-content: center; min-height: 52px; width: 100%; }
+.cobro-confirmar { background: var(--bg); border: 1px solid var(--violet); border-radius: 14px; padding: 14px; }
+.cobro-confirmar p { margin: 0 0 10px; }
+.cobro-confirmar .extension-hint { margin: 0 0 12px; }
+.cobro-confirmar-botones { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+.cobro-confirmar-botones .btn { justify-content: center; min-height: 48px; }
+.cobro-nota { margin: 14px 0 0; }
+.cobros-lista { list-style: none; margin: 0; padding: 0; }
+.cobros-lista li { align-items: center; border-top: 1px solid var(--line); display: grid; gap: 12px; grid-template-columns: auto 1fr auto; padding: 12px 0; }
+.cobros-lista li:first-child { border-top: 0; }
+.cobros-hora { color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
+.cobros-monto { font-variant-numeric: tabular-nums; }
+.cobros-lista li.anulado .cobros-monto { color: var(--muted); text-decoration: line-through; }
+.operations-table tbody tr.report-total-row td { border-top: 2px solid var(--line); font-weight: 800; }
