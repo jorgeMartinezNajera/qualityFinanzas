@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getAdminClient, getSolicitante, generarCodigo } from '@/lib/server/supabase-admin'
-import { ALIAS_REGEX, correoInterno, puedeGestionar, rolesQuePuedeCrear } from '@/lib/permisos'
+import { ALIAS_REGEX, correoInterno, puedeGestionar, rolTieneSucursal, rolesQuePuedeCrear } from '@/lib/permisos'
 
 // Duración del bloqueo en Supabase Auth para cuentas desactivadas (~100 años).
 const BLOQUEO_INDEFINIDO = '876000h'
@@ -38,13 +38,14 @@ export async function POST(request) {
     return fallo('No tienes permiso para dar de alta ese rol.', 403)
   }
 
-  // El admin solo da de alta en su sucursal; el superadmin elige (salvo para otro superadmin).
+  // Solo los admins llevan sucursal: el admin da de alta en la suya y el superadmin elige.
+  // Superadmins y choferes van sin sucursal (los choferes forman el catálogo de choferes).
   let sucursalId = null
-  if (rol !== 'superadmin') {
+  if (rolTieneSucursal(rol)) {
     sucursalId = perfil.rol === 'admin' ? perfil.sucursal_id : body.sucursal_id
     const { data: sucursal } = await adminClient
-      .from('sucursales').select('id, activa').eq('id', sucursalId || '').maybeSingle()
-    if (!sucursal?.activa) return fallo('Selecciona una sucursal válida.', 400)
+      .from('sucursales').select('id, activa, tipo').eq('id', sucursalId || '').maybeSingle()
+    if (!sucursal?.activa || sucursal.tipo !== 'sucursal') return fallo('Selecciona una sucursal válida.', 400)
   }
 
   const { data: existente } = await adminClient.from('usuarios').select('id').eq('alias', alias).maybeSingle()

@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { getAccessToken } from '@/lib/session'
-import { NOMBRE_ROL, correoInterno, puedeGestionar, rolesQuePuedeCrear } from '@/lib/permisos'
-import { TODAS, usePanel } from '@/components/panel/PanelProvider'
+import { NOMBRE_ROL, correoInterno, puedeGestionar, rolTieneSucursal, rolesQuePuedeCrear } from '@/lib/permisos'
+import { TODAS, TODAS_CUENTAS, usePanel } from '@/components/panel/PanelProvider'
 import { EsqueletoTabla } from '@/components/panel/Esqueleto'
 
 const formInicial = { nombre: '', alias: '', rol: 'chofer', sucursal_id: '' }
@@ -21,7 +21,7 @@ async function llamarApi(method, body) {
 
 export default function UsuariosPage() {
   // Sesión y sucursales vienen del layout del panel; solo admin y superadmin llegan aquí.
-  const { usuario: yo, sucursales, sucursalActiva, leerCache, guardarCache } = usePanel()
+  const { usuario: yo, soloSucursales, cuentaChoferes, sucursalActiva, leerCache, guardarCache } = usePanel()
   const [personas, setPersonas] = useState(() => leerCache('personas') || null)  // null = aún no llegan
   const [form, setForm] = useState(formInicial)
   const [codigoNuevo, setCodigoNuevo] = useState(null) // { nombre, alias, codigo }
@@ -44,9 +44,11 @@ export default function UsuariosPage() {
   }, [cargar])
 
   const cargando = personas === null
-  // El superadmin filtra con el selector de sucursal del encabezado; los superadmins siempre se listan.
+  // Se filtra con el selector del encabezado. Superadmins y choferes (catálogo común) siempre se listan;
+  // los admins, según su sucursal.
   const visibles = useMemo(() => (personas || []).filter(p =>
-    sucursalActiva === TODAS || p.rol === 'superadmin' || p.sucursal_id === sucursalActiva
+    sucursalActiva === TODAS || sucursalActiva === TODAS_CUENTAS
+    || p.rol !== 'admin' || p.sucursal_id === sucursalActiva
   ), [personas, sucursalActiva])
 
   async function crear(event) {
@@ -90,14 +92,17 @@ export default function UsuariosPage() {
   }
 
   const rolesPermitidos = rolesQuePuedeCrear(yo)
-  const eligeSucursal = yo.rol === 'superadmin' && form.rol !== 'superadmin'
+  const eligeSucursal = yo.rol === 'superadmin' && rolTieneSucursal(form.rol)
+  const textoSucursal = form.rol === 'superadmin' ? 'Todas'
+    : form.rol === 'chofer' ? 'Catálogo de choferes'
+    : (yo.sucursal?.nombre || '')
 
   return (
     <main className="extension-page">
       <p className="extension-hint">
         {yo.rol === 'superadmin'
-          ? 'Alta y control de acceso en todas las sucursales.'
-          : `Alta y control de acceso en ${yo.sucursal?.nombre || 'tu sucursal'}.`}
+          ? 'Alta y control de acceso en todas las sucursales y del catálogo de choferes.'
+          : `Alta y control de acceso en ${yo.sucursal?.nombre || 'tu sucursal'} y del catálogo de choferes.`}
       </p>
 
       {error && <p className="extension-alert error" role="alert">{error}</p>}
@@ -109,7 +114,7 @@ export default function UsuariosPage() {
         </div>
       )}
 
-      <section className="extension-grid">
+      <section className="personal-alta">
         <form className="extension-card" onSubmit={crear}>
           <h2>Dar de alta</h2>
           <label>Nombre completo
@@ -136,29 +141,21 @@ export default function UsuariosPage() {
               <label>Sucursal
                 <select required value={form.sucursal_id} onChange={e => setForm({ ...form, sucursal_id: e.target.value })}>
                   <option value="">Selecciona…</option>
-                  {sucursales.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                  {soloSucursales.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
                 </select>
               </label>
             ) : (
               <label>Sucursal
-                <input disabled value={form.rol === 'superadmin' ? 'Todas' : (yo.sucursal?.nombre || '')} />
+                <input disabled value={textoSucursal} />
               </label>
             )}
           </div>
-          {form.rol === 'chofer' && <p className="extension-hint">El chofer puede registrar pedidos en ambas sucursales; esta sucursal es la que lo administra.</p>}
+          {form.rol === 'chofer' && <p className="extension-hint">El chofer trabaja para ambas sucursales. Sus cobros entran a la cuenta {cuentaChoferes?.nombre || 'Abono de choferes'}.</p>}
           <button className="btn btn-primary" type="submit" disabled={enviando}>
             {enviando ? 'Creando…' : 'Crear y generar código'}
           </button>
         </form>
 
-        <div className="extension-card">
-          <h2>Quién puede hacer qué</h2>
-          <ul className="extension-list">
-            <li><strong>Superadmin:</strong> ve ambas sucursales y da de alta superadmins, admins y choferes.</li>
-            <li><strong>Administrador:</strong> administra solo su sucursal y da de alta admins y choferes en ella.</li>
-            <li><strong>Chofer:</strong> registra pedidos para ambas sucursales y solo ve sus propios reportes.</li>
-          </ul>
-        </div>
       </section>
 
       <section className="extension-card">
@@ -178,7 +175,7 @@ export default function UsuariosPage() {
                     <td>{p.nombre}{p.id === yo.id && ' (tú)'}</td>
                     <td>{p.alias}</td>
                     <td>{NOMBRE_ROL[p.rol] || p.rol}</td>
-                    <td>{p.sucursal?.nombre || 'Todas'}</td>
+                    <td>{p.rol === 'chofer' ? 'Catálogo de choferes' : (p.sucursal?.nombre || 'Todas')}</td>
                     <td><span className={`tag ${p.activo ? 'tag-in' : 'tag-out'}`}>{p.activo ? 'Activo' : 'Inactivo'}</span></td>
                     <td className="extension-actions">
                       {gestionable && (

@@ -1,7 +1,7 @@
 'use client'
 
 // Estructura común del panel: sesión, menú lateral y encabezado.
-// Next.js no vuelve a montar este layout al navegar entre /finanzas, /pedidos y /usuarios,
+// Next.js no vuelve a montar este layout al navegar entre /finanzas, /cobros y /usuarios,
 // así que la sesión se carga una sola vez y el menú queda siempre disponible.
 
 import { Suspense, useEffect, useState, useSyncExternalStore } from 'react'
@@ -9,8 +9,8 @@ import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { getPerfilRapido } from '@/lib/session'
-import { NOMBRE_ROL, esAdministrador } from '@/lib/permisos'
-import { EVENTO_ACCION, PanelProvider, TODAS, usePanel } from '@/components/panel/PanelProvider'
+import { NOMBRE_ROL, esAdministrador, rutaInicio } from '@/lib/permisos'
+import { EVENTO_ACCION, PanelProvider, TODAS, TODAS_CUENTAS, usePanel } from '@/components/panel/PanelProvider'
 import { EsqueletoBloque, EsqueletoSeccion } from '@/components/panel/Esqueleto'
 
 /* ── Modo oscuro (preferencia en localStorage) ── */
@@ -34,6 +34,7 @@ const ICONOS = {
   resumen: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
   todos: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
   reportes: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>,
+  cobros: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/></svg>,
   pedidos: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="7" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M16 3l5 5-5 5"/><path d="M21 8h-8"/></svg>,
   personal: <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
 }
@@ -42,18 +43,20 @@ const ICONO_MAS = <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke
 const ICONO_AGREGAR = <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
 
 // enIsla: aparece en la isla flotante de íconos del teléfono (el resto queda en "Más").
+// para: roles que ven la sección. Pedidos quedó oculto (sus tablas siguen en la base).
+const ADMINS = ['admin', 'superadmin']
 const SECCIONES = [
-  { id: 'resumen', etiqueta: 'Resumen', href: '/finanzas', ruta: '/finanzas', vista: 'resumen', titulo: 'Finanzas', soloAdmin: true, enIsla: true },
-  { id: 'todos', etiqueta: 'Todos los registros', corto: 'Registros', href: '/finanzas?vista=todos', ruta: '/finanzas', vista: 'todos', titulo: 'Finanzas', soloAdmin: true, enIsla: true },
-  { id: 'reportes', etiqueta: 'Reportes', href: '/finanzas?vista=reportes', ruta: '/finanzas', vista: 'reportes', titulo: 'Finanzas', soloAdmin: true, enIsla: true },
-  { id: 'pedidos', etiqueta: 'Pedidos', href: '/pedidos', ruta: '/pedidos', titulo: 'Pedidos', soloAdmin: false, enIsla: true },
-  { id: 'personal', etiqueta: 'Personal', href: '/usuarios', ruta: '/usuarios', titulo: 'Personal', soloAdmin: true, enIsla: false },
+  { id: 'resumen', etiqueta: 'Resumen', href: '/finanzas', ruta: '/finanzas', vista: 'resumen', titulo: 'Finanzas', para: ADMINS, enIsla: true },
+  { id: 'todos', etiqueta: 'Todos los registros', corto: 'Registros', href: '/finanzas?vista=todos', ruta: '/finanzas', vista: 'todos', titulo: 'Finanzas', para: ADMINS, enIsla: true },
+  { id: 'reportes', etiqueta: 'Reportes', href: '/finanzas?vista=reportes', ruta: '/finanzas', vista: 'reportes', titulo: 'Finanzas', para: ADMINS, enIsla: true },
+  { id: 'cobros', etiqueta: 'Registrar cobro', corto: 'Cobros', href: '/cobros', ruta: '/cobros', titulo: 'Cobros', para: ['chofer'], enIsla: true },
+  { id: 'personal', etiqueta: 'Personal', href: '/usuarios', ruta: '/usuarios', titulo: 'Personal', para: ADMINS, enIsla: false },
 ]
 
-/** Rutas a las que puede entrar cada rol (el chofer solo trabaja en pedidos). */
+/** Rutas a las que puede entrar cada rol: el chofer solo registra cobros; los admins, todo lo demás. */
 function rutaPermitida(usuario, pathname) {
-  if (esAdministrador(usuario)) return true
-  return pathname.startsWith('/pedidos')
+  const esCobros = pathname.startsWith('/cobros')
+  return esAdministrador(usuario) ? !esCobros : esCobros
 }
 
 /* ── Esqueleto del panel completo (mientras se lee la sesión) ── */
@@ -78,7 +81,7 @@ function Estructura({ children }) {
   const pathname = usePathname()
   const vista = useSearchParams().get('vista') || 'resumen'
   const {
-    usuario, sucursales, sucursalActiva, setSucursalActiva, nombreSucursalActiva, encabezadoExtra, accionPrincipal,
+    usuario, cuentasVisibles, sucursalActiva, setSucursalActiva, nombreSucursalActiva, encabezadoExtra, accionPrincipal,
   } = usePanel()
   const [menuAbierto, setMenuAbierto] = useState(false)
   const darkMode = useSyncExternalStore(subscribeDarkMode, getDarkModeSnapshot, getDarkModeServerSnapshot)
@@ -104,11 +107,12 @@ function Estructura({ children }) {
     router.replace('/')
   }
 
-  const secciones = SECCIONES.filter(s => esAdministrador(usuario) || !s.soloAdmin)
+  const secciones = SECCIONES.filter(s => s.para.includes(usuario.rol))
   const activa = secciones.find(s => s.ruta === pathname && (!s.vista || s.vista === vista))
     || secciones.find(s => pathname.startsWith(s.ruta))
-  // Superadmin y chofer trabajan con ambas sucursales; el admin solo con la suya.
-  const eligeSucursal = usuario.rol === 'superadmin' || usuario.rol === 'chofer'
+  // Superadmin: todas las cuentas. Admin: su sucursal y Abono de choferes. Chofer: solo la de choferes.
+  const esSuperadmin = usuario.rol === 'superadmin'
+  const eligeSucursal = esAdministrador(usuario) && (esSuperadmin || cuentasVisibles.length > 1)
 
   return (
     <div className="app">
@@ -190,8 +194,9 @@ function Estructura({ children }) {
                 value={sucursalActiva}
                 onChange={e => setSucursalActiva(e.target.value)}
               >
-                <option value={TODAS}>Ambas sucursales</option>
-                {sucursales.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+                {esSuperadmin && <option value={TODAS_CUENTAS}>Todas las cuentas</option>}
+                {esSuperadmin && <option value={TODAS}>Ambas sucursales</option>}
+                {cuentasVisibles.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
               </select>
             </label>
           ) : (
@@ -266,7 +271,10 @@ function Sesion({ children }) {
         router.replace('/')
         return
       }
-      const { data: sucursales } = await supabase.from('sucursales').select('id, nombre').eq('activa', true).order('nombre')
+      // Cuentas: primero las sucursales (tipo 'sucursal') y al final Abono de choferes.
+      const { data: sucursales } = await supabase.from('sucursales')
+        .select('id, nombre, tipo').eq('activa', true)
+        .order('tipo', { ascending: false }).order('nombre')
       if (activo) setEstado({ usuario, sucursales: sucursales || [] })
     }
     cargar()
@@ -284,7 +292,7 @@ function Sesion({ children }) {
   const permitida = usuario ? rutaPermitida(usuario, pathname) : true
 
   useEffect(() => {
-    if (usuario && !permitida) router.replace('/pedidos')
+    if (usuario && !permitida) router.replace(rutaInicio(usuario))
   }, [usuario, permitida, router])
 
   if (!usuario || !permitida) return <PanelCargando />

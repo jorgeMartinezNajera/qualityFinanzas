@@ -22,7 +22,7 @@ function formInicial(sucursalId) {
 
 export default function PedidosPage() {
   // Sesión, sucursales y sucursal activa vienen del layout del panel (ya cargados).
-  const { usuario: yo, sucursales, sucursalActiva, setAccionPrincipal, leerCache, guardarCache } = usePanel()
+  const { usuario: yo, soloSucursales: sucursales, sucursalActiva, setAccionPrincipal, leerCache, guardarCache } = usePanel()
   // En teléfono el formulario de alta se pliega; lo abre el botón "+" de la isla de navegación.
   const [formAbierto, setFormAbierto] = useState(false)
   const formRef = useRef(null)

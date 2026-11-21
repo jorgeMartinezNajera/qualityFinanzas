@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { EVENTO_ACCION, TODAS, usePanel } from '@/components/panel/PanelProvider'
+import { EVENTO_ACCION, TODAS, TODAS_CUENTAS, usePanel } from '@/components/panel/PanelProvider'
 import { EsqueletoTabla } from '@/components/panel/Esqueleto'
 
 const MOV_COLUMNAS = [
@@ -17,14 +17,18 @@ const NUEVA_CATEGORIA = '__nueva__'
 const METODOS_PAGO = { efectivo: 'Efectivo', tarjeta: 'Tarjeta', transferencia: 'Transferencia' }
 const CATEGORIA_COLUMNAS = 'id, nombre, tipo, sucursal_id'
 
-/** Movimientos de una sucursal o de todas (RLS limita a las que el usuario puede ver). */
-function fetchMovimientos(sucursalId) {
+/**
+ * Movimientos de una cuenta, de ambas sucursales (TODAS: solo Plaza + San Mateo) o de todas
+ * las cuentas (TODAS_CUENTAS). RLS limita a las que el usuario puede ver.
+ */
+function fetchMovimientos(sucursalId, idsSucursales) {
   let query = supabase
     .from('movimientos')
     .select(MOV_COLUMNAS)
     .order('fecha', { ascending: false })
     .order('numero', { ascending: false })
-  if (sucursalId !== TODAS) query = query.eq('sucursal_id', sucursalId)
+  if (sucursalId === TODAS) query = query.in('sucursal_id', idsSucursales)
+  else if (sucursalId !== TODAS_CUENTAS) query = query.eq('sucursal_id', sucursalId)
   return query
 }
 
@@ -78,7 +82,11 @@ const REPORT_TABS = [
   { value: 'frecuencia', label: 'Frecuencia por categoría' },
   { value: 'montos', label: 'Montos por categoría' },
   { value: 'total', label: 'Ingresos vs gastos' },
+  { value: 'choferes', label: 'Cobros de choferes' },
 ]
+
+// Colores fijos por método de pago (reporte de cobros de choferes).
+const COLOR_METODO = { efectivo: '#22c1a4', tarjeta: '#6d5cff', transferencia: '#38bdf8' }
 
 const REPORT_PERIODS = [
   { value: 'all', label: 'Todo' },
@@ -250,6 +258,7 @@ function mapRow(t) {
     sucursalId: t.sucursal_id,
     sucursal: t.sucursal?.nombre || '',
     autor: t.autor?.nombre || '',
+    creadoEn: t.creado_en,
   }
 }
 
@@ -407,12 +416,122 @@ function TotalesCard({ totales }) {
   )
 }
 
+function formatDateTime(iso) {
+  return new Date(iso).toLocaleString('es-MX', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+/** Cobros de choferes: total por método de pago (efectivo, tarjeta, transferencia). */
+function CobrosMetodoCard({ metodos, total, cantidad }) {
+  const slices = metodos.reduce(({ cum, list }, m) => {
+    if (total <= 0 || m.monto <= 0) return { cum, list }
+    const from = (cum / total) * 100
+    const to = ((cum + m.monto) / total) * 100
+    return { cum: cum + m.monto, list: [...list, `${COLOR_METODO[m.metodo]} ${from}% ${to}%`] }
+  }, { cum: 0, list: [] }).list
+  return (
+    <section className="report-card">
+      <div className="report-card-header">
+        <h2 className="overview-title">Cobros por método de pago</h2>
+        <span className="count-badge">{cantidad} cobro{cantidad === 1 ? '' : 's'}</span>
+      </div>
+      {total <= 0 ? (
+        <p className="empty-cat">Sin cobros de choferes en este periodo.</p>
+      ) : (
+        <div className="report-grid">
+          <div className="chart-side">
+            <div className="donut" role="img" aria-label="Cobros de choferes por método de pago" style={{ background: `conic-gradient(${slices.join(', ')})` }}>
+              <div className="donut-center">
+                <span className="donut-value">${formatMoney(total)}</span>
+                <span className="donut-label">Total cobrado</span>
+              </div>
+            </div>
+            <p className="chart-caption">Cobros de choferes por método de pago</p>
+          </div>
+          <div className="report-table-wrap">
+            <table className="operations-table report-table">
+              <thead>
+                <tr>
+                  <th>Método</th>
+                  <th className="col-amount">Cobros</th>
+                  <th className="col-amount">Monto</th>
+                  <th className="col-amount">%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metodos.map(m => (
+                  <tr key={m.metodo}>
+                    <td><span className="cat-chip"><span className="cat-dot" style={{ '--c': COLOR_METODO[m.metodo] }}></span>{METODOS_PAGO[m.metodo]}</span></td>
+                    <td className="col-amount op-id">{m.cantidad}</td>
+                    <td className="col-amount amount">${formatMoney(m.monto)}</td>
+                    <td className="col-amount op-id">{pctLabel(m.monto / total)}</td>
+                  </tr>
+                ))}
+                <tr className="report-total-row">
+                  <td>Total</td>
+                  <td className="col-amount">{cantidad}</td>
+                  <td className="col-amount amount">${formatMoney(total)}</td>
+                  <td className="col-amount">100%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+/** Cobros de choferes: detalle de cada entrada. */
+function CobrosDetalleCard({ cobros, mostrarSucursal }) {
+  return (
+    <section className="report-card">
+      <div className="report-card-header">
+        <h2 className="overview-title">Detalle de cobros</h2>
+        <span className="count-badge">{cobros.length} registro{cobros.length === 1 ? '' : 's'}</span>
+      </div>
+      {cobros.length === 0 ? (
+        <p className="empty-cat">Sin cobros de choferes en este periodo.</p>
+      ) : (
+        <div className="table-wrap">
+          <table className="operations-table cobros-detalle-table">
+            <thead>
+              <tr>
+                <th>Fecha y hora</th>
+                <th>Folio</th>
+                <th>Chofer</th>
+                {mostrarSucursal && <th>Sucursal</th>}
+                <th>Método</th>
+                <th className="col-amount">Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cobros.map(c => (
+                <tr key={c.id}>
+                  <td>{formatDateTime(c.creadoEn)}</td>
+                  <td className="op-id">{c.folio}</td>
+                  <td>{c.autor || '—'}</td>
+                  {mostrarSucursal && <td>{c.sucursal}</td>}
+                  <td><span className="cat-chip"><span className="cat-dot" style={{ '--c': COLOR_METODO[c.metodoPago] }}></span>{METODOS_PAGO[c.metodoPago] || c.metodoPago}</span></td>
+                  <td className="col-amount amount in">+${formatMoney(c.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export default function Finanzas() {
   const {
-    usuario, sucursales, sucursalActiva, esVistaGlobal, nombreSucursalActiva,
+    usuario, cuentasVisibles, soloSucursales, cuentaChoferes, sucursalActiva, esVistaGlobal, nombreSucursalActiva,
     setEncabezadoExtra, setAccionPrincipal, leerCache, guardarCache,
   } = usePanel()
   const currentUser = usuario
+  const idsSucursales = useMemo(() => soloSucursales.map(s => s.id), [soloSucursales])
+  // El reporte de choferes solo tiene datos en su cuenta o en "Todas las cuentas".
+  const vistaIncluyeChoferes = sucursalActiva === TODAS_CUENTAS || sucursalActiva === cuentaChoferes?.id
 
   // Movimientos por sucursal: al cambiar de sucursal o volver a esta sección se muestran
   // los últimos datos al instante mientras se recargan.
@@ -488,7 +607,7 @@ export default function Finanzas() {
   /* Movimientos de la sucursal activa (se recargan al cambiarla). */
   useEffect(() => {
     let active = true
-    fetchMovimientos(sucursalActiva).then(({ data, error }) => {
+    fetchMovimientos(sucursalActiva, idsSucursales).then(({ data, error }) => {
       if (!active) return
       if (error) { setLoadError(true); return }
       setLoadError(false)
@@ -500,11 +619,11 @@ export default function Finanzas() {
       })
     })
     return () => { active = false }
-  }, [sucursalActiva, guardarCache])
+  }, [sucursalActiva, idsSucursales, guardarCache])
 
   async function reload() {
     setLoadError(false)
-    const { data, error } = await fetchMovimientos(sucursalActiva)
+    const { data, error } = await fetchMovimientos(sucursalActiva, idsSucursales)
     if (error) { setLoadError(true); return }
     guardarMovimientos(sucursalActiva, data.map(mapRow))
   }
@@ -642,6 +761,17 @@ export default function Finanzas() {
     return { entrada, salida, total: entrada + salida }
   }, [active])
 
+  const reportChoferes = useMemo(() => {
+    const cobros = active
+      .filter(m => m.origen === 'chofer')
+      .sort((a, b) => new Date(b.creadoEn) - new Date(a.creadoEn))
+    const metodos = Object.keys(METODOS_PAGO).map(metodo => {
+      const delMetodo = cobros.filter(c => c.metodoPago === metodo)
+      return { metodo, cantidad: delMetodo.length, monto: delMetodo.reduce((s, c) => s + c.amount, 0) }
+    })
+    return { cobros, metodos, total: metodos.reduce((s, m) => s + m.monto, 0) }
+  }, [active])
+
   /* ── Exportar Reporte a Excel ── */
 
   function exportReportExcel() {
@@ -658,6 +788,9 @@ export default function Finanzas() {
     } else if (reportType === 'montos') {
       reportTitle = 'Reporte de Montos por Categoría'
       reportFilePrefix = 'reporte_montos_categorias'
+    } else if (reportType === 'choferes') {
+      reportTitle = 'Reporte de Cobros de Choferes'
+      reportFilePrefix = 'reporte_cobros_choferes'
     }
 
     const fileName = `${reportFilePrefix}_${dateSlug}.xls`
@@ -787,8 +920,51 @@ export default function Finanzas() {
       `
     }
 
-    // Detalle fila por fila de movimientos
-    const detailRowsHtml = active.map(m => `
+    if (reportType === 'choferes') {
+      summaryHtml = `
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; margin-bottom: 20px; font-family: Segoe UI, Arial, sans-serif;">
+          <tr style="background-color:#059669; color:#ffffff; font-weight:bold;">
+            <th colspan="4" style="font-size:11pt; text-align:left; padding:8px;">COBROS DE CHOFERES POR MÉTODO DE PAGO (Total: $${formatMoney(reportChoferes.total)})</th>
+          </tr>
+          <tr style="background-color:#f8fafc; font-weight:bold;">
+            <td style="width:200px;">Método</td>
+            <td style="width:110px; text-align:right;">Cobros</td>
+            <td style="width:160px; text-align:right;">Monto ($)</td>
+            <td style="width:120px; text-align:right;">% del Total</td>
+          </tr>
+          ${reportChoferes.metodos.map(m => `
+            <tr>
+              <td>${METODOS_PAGO[m.metodo]}</td>
+              <td style="text-align:right;">${m.cantidad}</td>
+              <td style="text-align:right; font-weight:bold; color:#059669;">$${formatMoney(m.monto)}</td>
+              <td style="text-align:right;">${reportChoferes.total > 0 ? pctLabel(m.monto / reportChoferes.total) : '0%'}</td>
+            </tr>
+          `).join('')}
+          <tr style="background-color:#e0e7ff; font-weight:bold;">
+            <td>TOTAL</td>
+            <td style="text-align:right;">${reportChoferes.cobros.length}</td>
+            <td style="text-align:right;">$${formatMoney(reportChoferes.total)}</td>
+            <td style="text-align:right;">100%</td>
+          </tr>
+        </table>
+      `
+    }
+
+    // Detalle fila por fila: en el reporte de choferes solo sus cobros, con chofer, hora y método.
+    const esChoferes = reportType === 'choferes'
+    const filasDetalle = esChoferes ? reportChoferes.cobros : active
+    const detailRowsHtml = esChoferes
+    ? filasDetalle.map(c => `
+      <tr>
+        <td>${formatDateTime(c.creadoEn)}</td>
+        <td style="font-family:monospace;">${c.folio}</td>
+        <td>${c.autor || '—'}</td>
+        <td>${c.sucursal}</td>
+        <td>${METODOS_PAGO[c.metodoPago] || c.metodoPago}</td>
+        <td style="text-align:right; font-weight:bold; color:#059669;">+$${formatMoney(c.amount)}</td>
+      </tr>
+    `).join('')
+    : active.map(m => `
       <tr>
         <td>${formatDate(m.date)}</td>
         <td style="font-family:monospace;">${m.folio}</td>
@@ -837,7 +1013,7 @@ export default function Finanzas() {
             <td style="font-weight:bold; color:#475569;">Fecha de emisión:</td>
             <td colspan="2">${genDate}</td>
             <td style="font-weight:bold; color:#475569;">Registros incluidos:</td>
-            <td colspan="2">${active.length} movimientos</td>
+            <td colspan="2">${filasDetalle.length} movimientos</td>
           </tr>
         </table>
 
@@ -847,8 +1023,17 @@ export default function Finanzas() {
         <!-- Detalle de transacciones -->
         <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:100%; font-family: Segoe UI, Arial, sans-serif;">
           <tr style="background-color:#1e293b; color:#ffffff; font-weight:bold;">
-            <th colspan="6" style="font-size:11pt; text-align:left; padding:8px;">DETALLE DE TRANSACCIONES (${active.length} registros)</th>
+            <th colspan="6" style="font-size:11pt; text-align:left; padding:8px;">${esChoferes ? 'DETALLE DE COBROS DE CHOFERES' : 'DETALLE DE TRANSACCIONES'} (${filasDetalle.length} registros)</th>
           </tr>
+          ${esChoferes ? `
+          <tr style="background-color:#f1f5f9; font-weight:bold;">
+            <th style="width:150px; text-align:left;">Fecha y hora</th>
+            <th style="width:100px; text-align:left;">Folio</th>
+            <th style="width:180px; text-align:left;">Chofer</th>
+            <th style="width:120px; text-align:left;">Sucursal</th>
+            <th style="width:120px; text-align:left;">Método</th>
+            <th style="width:130px; text-align:right;">Monto ($)</th>
+          </tr>` : `
           <tr style="background-color:#f1f5f9; font-weight:bold;">
             <th style="width:110px; text-align:left;">Fecha</th>
             <th style="width:100px; text-align:left;">Folio</th>
@@ -856,7 +1041,7 @@ export default function Finanzas() {
             <th style="width:150px; text-align:left;">Categoría</th>
             <th style="width:280px; text-align:left;">Concepto</th>
             <th style="width:130px; text-align:right;">Monto ($)</th>
-          </tr>
+          </tr>`}
           ${detailRowsHtml || '<tr><td colspan="6" style="text-align:center; padding:14px; color:#64748b;">No hay transacciones para los filtros seleccionados</td></tr>'}
         </table>
       </body>
@@ -985,7 +1170,7 @@ export default function Finanzas() {
     const monto = parseFloat(addForm.monto)
     const sucursalDestino = esVistaGlobal ? addForm.sucursalId : sucursalActiva
     const errs = {}
-    if (!sucursalDestino) errs.sucursalId = 'Selecciona la sucursal.'
+    if (!sucursalDestino) errs.sucursalId = 'Selecciona la cuenta.'
     if (!monto || monto <= 0 || Number.isNaN(monto)) errs.monto = 'Ingresa un monto mayor a cero.'
     if (!addForm.categoriaId) errs.categoriaId = 'Selecciona una categoría.'
     if (addForm.categoriaId === NUEVA_CATEGORIA && !addForm.nuevaCategoria.trim()) errs.nuevaCategoria = 'Escribe el nombre de la categoría.'
@@ -1518,6 +1703,18 @@ export default function Finanzas() {
         )}
 
         {reportType === 'total' && <TotalesCard totales={reportTotales} />}
+
+        {reportType === 'choferes' && (
+          <div className="report-stack">
+            {!vistaIncluyeChoferes && reportChoferes.cobros.length === 0 && cuentaChoferes && (
+              <p className="extension-alert info">
+                Los cobros de choferes se registran en la cuenta <strong>{cuentaChoferes.nombre}</strong>. Elígela en el selector de arriba para verlos.
+              </p>
+            )}
+            <CobrosMetodoCard metodos={reportChoferes.metodos} total={reportChoferes.total} cantidad={reportChoferes.cobros.length} />
+            <CobrosDetalleCard cobros={reportChoferes.cobros} mostrarSucursal={esVistaGlobal} />
+          </div>
+        )}
       </div>
 
       {/* ── Menú contextual de fila ── */}
@@ -1527,6 +1724,12 @@ export default function Finanzas() {
             const m = movements.find(x => x.id === menuTarget)
             if (!m) return null
             if (m.retirado) return <p className="row-menu-note">Anulado: {m.motivoAnulacion}</p>
+            if (m.origen === 'chofer') return (
+              <>
+                <p className="row-menu-note">Cobro registrado por {m.autor || 'un chofer'}; solo se puede anular.</p>
+                <button className="row-menu-item row-menu-danger" onClick={() => { setMenuTarget(null); requestDelete(m.id) }}>Anular</button>
+              </>
+            )
             if (m.origen !== 'manual') return <p className="row-menu-note">Generado por un pedido; se corrige desde el pedido.</p>
             return (
               <>
@@ -1583,10 +1786,10 @@ export default function Finanzas() {
           <form id="movementForm" onSubmit={handleAddSubmit} noValidate>
             {esVistaGlobal && (
               <div className="form-row">
-                <label htmlFor="addSucursal">Sucursal</label>
+                <label htmlFor="addSucursal">Cuenta</label>
                 <select id="addSucursal" name="sucursalId" value={addForm.sucursalId} onChange={handleAddChange} className={addErrors.sucursalId ? 'invalid' : ''}>
                   <option value="">Selecciona…</option>
-                  {sucursales.map(x => <option key={x.id} value={x.id}>{x.nombre}</option>)}
+                  {cuentasVisibles.map(x => <option key={x.id} value={x.id}>{x.nombre}</option>)}
                 </select>
                 {addErrors.sucursalId && <p className="form-error">{addErrors.sucursalId}</p>}
               </div>
@@ -1606,7 +1809,7 @@ export default function Finanzas() {
             <div className="form-row">
               <label htmlFor="addCategoria">Categoría</label>
               <select id="addCategoria" name="categoriaId" value={addForm.categoriaId} onChange={handleAddChange} disabled={esVistaGlobal && !addForm.sucursalId} className={addErrors.categoriaId ? 'invalid' : ''}>
-                <option value="">{esVistaGlobal && !addForm.sucursalId ? 'Primero elige la sucursal' : 'Selecciona…'}</option>
+                <option value="">{esVistaGlobal && !addForm.sucursalId ? 'Primero elige la cuenta' : 'Selecciona…'}</option>
                 {categoriasPara(esVistaGlobal ? addForm.sucursalId : sucursalActiva, addForm.tipo).map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                 <option value={NUEVA_CATEGORIA}>+ Nueva categoría…</option>
               </select>
