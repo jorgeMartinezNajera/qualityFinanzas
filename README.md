@@ -86,7 +86,7 @@ tintoreria-app/
 ├── scripts/
 │   ├── crear-superadmin.mjs         # Alta del primer superadmin
 │   ├── restablecer-codigo.mjs       # Código nuevo para un alias (recuperación)
-│   └── keep-alive.mjs               # Ping de solo lectura, para GitHub Actions
+│   └── keep-alive.mjs               # Ping de solo lectura directo a Supabase (uso manual)
 ├── supabase/
 │   ├── fase1_sucursales_usuarios.sql
 │   ├── fase2_finanzas_sucursal.sql
@@ -95,7 +95,8 @@ tintoreria-app/
 │   ├── fase3b_permisos_triggers.sql
 │   ├── fase3c_tres_estados.sql
 │   └── historico/                   # Scripts anteriores, ya no se ejecutan
-└── .github/workflows/keep-alive.yml # Cron cada 2 días
+├── vercel.json                      # Vercel Cron diario a /api/keep-alive
+└── .github/workflows/keep-alive.yml # Respaldo: curl a /api/keep-alive 2 veces al día
 ```
 
 ---
@@ -239,7 +240,7 @@ Pedidos con folio, cliente, teléfono, sucursal, chofer, `pagado` y `saldo`. Res
    - **Solo admin:** regresar un paso, cancelar con motivo, reasignar chofer y anular pagos.
    - Al entregar con saldo pendiente se pide confirmación.
 6. **Tema oscuro:** botón en el menú del panel, guardado en `localStorage` (es su único uso).
-7. **Keep-Alive:** GitHub Actions corre `scripts/keep-alive.mjs` cada 2 días y `GET /api/keep-alive` sirve para monitores externos. Ambos hacen una consulta de solo lectura.
+7. **Keep-Alive:** Supabase pausa los proyectos gratuitos con poca actividad durante 7 días. `GET /api/keep-alive` hace una consulta de solo lectura y lo llaman dos fuentes: Vercel Cron (`vercel.json`, diario a las 14:00 UTC) y GitHub Actions como respaldo (08:00 y 20:00 UTC, con `curl`, sin secretos). `scripts/keep-alive.mjs` queda para uso manual.
 
 ---
 
@@ -299,6 +300,12 @@ La app corre en `http://localhost:3000`.
 ---
 
 ## Registro de cambios
+
+### 2026-11-22 — Keep-alive de Supabase más frecuente
+
+- El keep-alive corría cada 2 días y no dejó rastro en los logs de Supabase (posiblemente faltaban los secretos en el repo que despliega). Supabase pide unas cuantas peticiones al día.
+- Nuevo `vercel.json` con Vercel Cron diario a `/api/keep-alive`.
+- La GitHub Action pasa a ser respaldo: 2 veces al día, solo un `curl` a `/api/keep-alive` (ya no usa `npm ci` ni secretos).
 
 ### 2026-11-08 — Optimización para teléfono
 - **Encabezado:** en dos filas, porque antes el saldo se salía de la pantalla. El selector de sucursal tiene ícono y ocupa todo el ancho.
